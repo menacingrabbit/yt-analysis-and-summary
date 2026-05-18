@@ -90,7 +90,7 @@ def summarise(transcript: str) -> str:
     """
     logger.info(f"Summarising transcript (length={len(transcript)} chars)")
     prompt = (
-        "Summarise the following transcript in 3‑5 bullet points, focusing on the main ideas, arguments, and conclusions. Use concise language.\n\n"
+        "Summarise the following transcript in bullet points, focusing on the main ideas, arguments, and conclusions. Write detailed but concise summaries. Finally, write 1 sentence summarising the key takeaway. Use concise language.\n\n"
         "```\n"
         f"{transcript}\n"
         "```"
