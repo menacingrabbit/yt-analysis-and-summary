@@ -35,8 +35,8 @@ def _progress_hook(d: dict) -> None:
         # Ensure bar completes
         if hasattr(_progress_hook, "bar"):
             _progress_hook.bar.close()
-            # Print a newline to avoid overlapping with the next log message                                                                                                               
-            print()  
+            # Print a newline to avoid overlapping with the next log message
+            print()
             logger.info("Download finished, now converting (if ffmpeg is available)…")
 
 def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
@@ -80,7 +80,7 @@ def download_audio(url: str, out_dir: Path) -> Path:
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # First extract info to get the title and generate our slug
+    # Extract info once to get the title and generate our slug
     with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
         info = ydl.extract_info(url, download=False)
         title = info.get("title", "audio")
@@ -99,8 +99,7 @@ def download_audio(url: str, out_dir: Path) -> Path:
         info = ydl.extract_info(url, download=True)
         original_path = Path(ydl.prepare_filename(info))
 
-    title = info.get("title", "audio")
-    slug = slugify(title)
+    # Use the same slug we computed earlier (title shouldn't change between extract_info calls)
     mp3_path = out_dir / f"{slug}.mp3"
 
     # Convert to MP3 using ffmpeg (or copy if unavailable/fails)
