@@ -56,22 +56,61 @@ def main() -> int:
         transcript = transcribe(audio_path)
         # Save transcript - use the same base name as the audio file (without extension)
         base_name = Path(audio_path).stem  # This already contains the date prefix from slugify
-        transcript_path = out_dir / f"{base_name}_transcript.txt"
-        transcript_path.write_text(transcript, encoding="utf-8")
-        console.print(f"[green]Transcript written to:[/] {transcript_path}")
+        _save_transcript(transcript, out_dir, base_name)
 
         if not args.no_summary:
             console.print("[bold cyan]Generating summary…[/]")
-            summarise_and_save(transcript, out_dir, base_name)
+            _save_summary(transcript, out_dir, base_name)
         else:
             console.print("[yellow]Summary step skipped as requested.[/]")
 
         console.print("[bold green]All done![/]")
         return 0
-    except Exception as exc:  # pylint: disable=broad-except
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by user")
+        console.print("[yellow]Process interrupted by user[/]")
+        return 1
+    except ValueError as exc:  # Invalid input/URL
+        logger.error(f"Invalid input: {exc}")
+        console.print(f"[red]Error:[/] {exc}")
+        return 1
+    except RuntimeError as exc:  # Processing errors
         logger.error(f"Processing failed: {exc}")
         console.print(f"[red]Error:[/] {exc}")
         return 1
+    except Exception as exc:  # pylint: disable=broad-except
+        # Catch-all for unexpected errors
+        logger.error(f"Unexpected error: {exc}")
+        console.print(f"[red]Unexpected error:[/] {exc}")
+        return 1
+
+
+def _save_transcript(transcript: str, out_dir: Path, base_name: str) -> None:
+    """Save transcript to file.
+
+    Args:
+        transcript: The transcript text to save
+        out_dir: Output directory
+        base_name: Base filename (without extension)
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = out_dir / f"{base_name}_transcript.txt"
+    transcript_path.write_text(transcript, encoding="utf-8")
+    console.print(f"[green]Transcript written to:[/] {transcript_path}")
+
+
+def _save_summary(transcript: str, out_dir: Path, base_name: str) -> None:
+    """Generate and save summary to file.
+
+    Args:
+        transcript: The transcript text to summarize
+        out_dir: Output directory
+        base_name: Base filename (without extension)
+    """
+    console.print("[bold cyan]Generating summary…[/]")
+    summarise_and_save(transcript, out_dir, base_name)
+    summary_path = out_dir / f"{base_name}_summary.txt"
+    console.print(f"[green]Summary written to:[/] {summary_path}")
 
 
 if __name__ == "__main__":
