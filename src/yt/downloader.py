@@ -16,28 +16,36 @@ from tqdm import tqdm
 from .utils import slugify
 from ..utils.logging import logger
 
-def _progress_hook(d: dict) -> None:
-    """Hook for yt-dlp to forward progress to tqdm.
 
-    yt-dlp passes dictionaries with a ``status`` key. We handle ``downloading``
-    and update the global tqdm bar.
+class ProgressManager:
+    """Manages tqdm progress bar state for downloads.
+
+    This class encapsulates progress bar state, making it thread-safe for
+    concurrent downloads (unlike storing state on function attributes).
     """
-    if d["status"] == "downloading":
-        total = d.get("total_bytes") or d.get("total_bytes_estimate")
-        downloaded = d.get("downloaded_bytes")
-        if not hasattr(_progress_hook, "bar"):
-            # Initialise tqdm bar on first call
-            _progress_hook.bar = tqdm(total=total, unit="B", unit_scale=True, desc="Downloading")
-        bar = _progress_hook.bar
-        bar.total = total or bar.total
-        bar.update(downloaded - bar.n)
-    elif d["status"] == "finished":
-        # Ensure bar completes
-        if hasattr(_progress_hook, "bar"):
-            _progress_hook.bar.close()
-            # Print a newline to avoid overlapping with the next log message
-            print()
-            logger.info("Download finished, now converting (if ffmpeg is available)…")
+
+    def __init__(self):
+        self._bar: tqdm | None = None
+
+    def hook(self, d: dict) -> None:
+        """Hook for yt-dlp to forward progress to tqdm.
+
+        yt-dlp passes dictionaries with a ``status`` key. We handle ``downloading``
+        and update the internal tqdm bar.
+        """
+        if d["status"] == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            downloaded = d.get("downloaded_bytes")
+            if self._bar is None:
+                self._bar = tqdm(total=total, unit="B", unit_scale=True, desc="Downloading")
+            self._bar.total = total or self._bar.total
+            self._bar.update(downloaded - self._bar.n)
+        elif d["status"] == "finished":
+            if self._bar is not None:
+                self._bar.close()
+                print()
+                logger.info("Download finished, now converting (if ffmpeg is available)...")
+
 
 def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
     """Run ffmpeg to convert *input_path* to MP3 *output_path*.
@@ -62,14 +70,15 @@ def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
         "mp3",
         str(output_path),
     ]
-    logger.info("Starting ffmpeg conversion…")
+    logger.info("Starting ffmpeg conversion...")
     try:
         subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as exc:
-        # Any error (including FileNotFoundError) falls back to copying.
+    except subprocess.SubprocessError as exc:
+        # Specific exception: conversion failure
         logger.warning(f"ffmpeg conversion failed ({exc}); copying original file instead.")
         output_path.write_bytes(input_path.read_bytes())
         return
+
 
 def download_audio(url: str, out_dir: Path) -> Path:
     """Download the best audio from *url* into *out_dir* and return MP3 path.
@@ -88,10 +97,11 @@ def download_audio(url: str, out_dir: Path) -> Path:
 
     # Use our slug as the base filename for yt-dlp
     temp_template = out_dir / f"{slug}.%(ext)s"
+    progress_mgr = ProgressManager()
     ydl_opts: dict[str, Any] = {
         "format": "bestaudio/best",
         "outtmpl": str(temp_template),
-        "progress_hooks": [_progress_hook],
+        "progress_hooks": [progress_mgr.hook],
         "quiet": True,
         "no_warnings": True,
     }
@@ -106,10 +116,7 @@ def download_audio(url: str, out_dir: Path) -> Path:
     _run_ffmpeg(original_path, mp3_path)
 
     # Remove the original download if it is different from the final output.
-    try:
-        if original_path.resolve() != mp3_path.resolve():
-            original_path.unlink()
-    except Exception:
-        pass
+    if original_path.resolve() != mp3_path.resolve():
+        original_path.unlink()
 
     return mp3_path

@@ -26,5 +26,17 @@ def get_env(name: str, *, default: str | None = None, required: bool = False) ->
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
 
-# Example required variable for OpenRouter API
-OPENROUTER_API_KEY = get_env("OPENROUTER_API_KEY", required=True)
+def get_api_key() -> str:
+    """Get the OpenRouter API key, raising an error only when actually needed.
+
+    This defers validation to usage time so users can run --help without an API key.
+    """
+    return get_env("OPENROUTER_API_KEY", required=True)
+
+
+# Lazy-evaluated API key - validates only when accessed
+def __getattr__(name: str):
+    """Lazy evaluation of OPENROUTER_API_KEY for backward compatibility."""
+    if name == "OPENROUTER_API_KEY":
+        return get_api_key()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

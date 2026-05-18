@@ -11,7 +11,7 @@ from pathlib import Path
 _MAX_LEN = 80
 
 def _clean(text: str) -> str:
-    # Normalize whitespace, replace non‑alphanumeric with hyphens, collapse repeats
+    """Clean text for use as a filename slug."""
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"[^\w\- ]+", "", text)
     text = re.sub(r"[\s_]+", "-", text)

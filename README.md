@@ -1,13 +1,13 @@
 # yt-analysis-and-summary
 
-A small Python CLI that downloads a YouTube video's audio, transcribes it with OpenRouter, and optionally produces a concise summary. The tool shows live progress bars for download and conversion and logs each step with colourful console output.
+A small Python CLI that downloads a YouTube video's audio, transcribes it with OpenRouter, and optionally produces a concise summary. The tool shows live progress bars for download and conversion and logs each step with colourful console output. Tested with German-language content.
 
 ## Features
 - **Audio download** using `yt-dlp` with progress displayed via `tqdm`
 - **FFmpeg conversion** to MP3 with a conversion progress indicator
-- **Transcription** via OpenRouter's speech‑to‑text model
-- **Summarisation** using the same model with a bullet‑point prompt
-- **Rich console logging** for clear, colour‑coded messages
+- **Transcription** via OpenRouter's speech-to-text model
+- **Summarisation** using the same model with a bullet-point prompt
+- **Rich console logging** for clear, colour-coded messages
 - **Standard development workflow** – lint (`ruff`), format (`black`), and test (`pytest`)
 
 ## Prerequisites
@@ -26,6 +26,7 @@ source .venv\Scripts\activate  # PowerShell: .\.venv\Scripts\Activate.ps1
 
 # Install dependencies
 pip install -r requirements.txt
+pip install -r requirements-dev.txt  # for development
 ```
 
 ## Usage
@@ -46,7 +47,7 @@ The CLI will display `tqdm` bars for the download and conversion steps and log t
 # Lint the code
 ruff check src/ tests/
 
-# Auto‑format
+# Auto-format
 black src/ tests/
 
 # Run the test suite
@@ -60,4 +61,4 @@ pytest
   - `OPENROUTER_SUMMARISE_MODEL`
 
 ## License
-MIT License – see `LICENSE` (if added) for details.
+MIT License

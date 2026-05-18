@@ -5,7 +5,6 @@ methods that delegate to ``rich.console.Console``.
 """
 
 from rich.console import Console
-from rich.pretty import Pretty
 
 console = Console()
 

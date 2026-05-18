@@ -15,7 +15,7 @@ from typing import Any, Dict
 
 import httpx
 
-from ..config import OPENROUTER_API_KEY
+from ..config import get_api_key
 from ..utils.logging import logger
 from ..utils.retry import retry
 
@@ -24,15 +24,16 @@ _AUDIO_API_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 # Chat endpoint for summarisation.
 _CHAT_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-_HEADERS = {
-    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-}
+
+def _get_headers() -> dict:
+    """Get headers with API key, evaluated lazily."""
+    return {"Authorization": f"Bearer {get_api_key()}"}
 
 def _post_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     """POST JSON payload to the chat endpoint and return the parsed JSON."""
     response = httpx.post(
         _CHAT_API_URL,
-        headers={**_HEADERS, "Content-Type": "application/json"},
+        headers={**_get_headers(), "Content-Type": "application/json"},
         json=payload,
         timeout=60.0,
     )
@@ -61,7 +62,7 @@ def _post_audio_json(audio_path: Path, model: str) -> Dict[str, Any]:
     }
     response = httpx.post(
         _AUDIO_API_URL,
-        headers={**_HEADERS, "Content-Type": "application/json"},
+        headers={**_get_headers(), "Content-Type": "application/json"},
         json=payload,
         timeout=60.0,
     )
