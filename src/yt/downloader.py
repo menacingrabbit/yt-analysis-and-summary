@@ -35,6 +35,8 @@ def _progress_hook(d: dict) -> None:
         # Ensure bar completes
         if hasattr(_progress_hook, "bar"):
             _progress_hook.bar.close()
+            # Print a newline to avoid overlapping with the next log message                                                                                                               
+            print()  
             logger.info("Download finished, now converting (if ffmpeg is available)…")
 
 def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
@@ -77,8 +79,15 @@ def download_audio(url: str, out_dir: Path) -> Path:
     file to MP3 when possible.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Temporary filename; yt-dlp will add its own extension.
-    temp_template = out_dir / "%(title)s.%(ext)s"
+
+    # First extract info to get the title and generate our slug
+    with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        info = ydl.extract_info(url, download=False)
+        title = info.get("title", "audio")
+        slug = slugify(title)
+
+    # Use our slug as the base filename for yt-dlp
+    temp_template = out_dir / f"{slug}.%(ext)s"
     ydl_opts: dict[str, Any] = {
         "format": "bestaudio/best",
         "outtmpl": str(temp_template),
