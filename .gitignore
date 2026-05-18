@@ -7,6 +7,9 @@
 # Ignore all outputs
 output/
 
+# Project Notes and initual planning documents
+project_notes.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

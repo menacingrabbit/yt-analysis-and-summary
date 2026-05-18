@@ -54,15 +54,15 @@ def main() -> int:
 
         console.print("[bold cyan]Transcribing audio…[/]")
         transcript = transcribe(audio_path)
-        # Save transcript
-        slug = slugify(Path(audio_path).stem)
-        transcript_path = out_dir / f"{slug}_transcript.txt"
+        # Save transcript - use the same base name as the audio file (without extension)
+        base_name = Path(audio_path).stem  # This already contains the date prefix from slugify
+        transcript_path = out_dir / f"{base_name}_transcript.txt"
         transcript_path.write_text(transcript, encoding="utf-8")
         console.print(f"[green]Transcript written to:[/] {transcript_path}")
 
         if not args.no_summary:
             console.print("[bold cyan]Generating summary…[/]")
-            summarise_and_save(transcript, out_dir, slug)
+            summarise_and_save(transcript, out_dir, base_name)
         else:
             console.print("[yellow]Summary step skipped as requested.[/]")
 
