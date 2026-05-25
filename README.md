@@ -7,6 +7,7 @@ A small Python CLI that downloads a YouTube video's audio, transcribes it with O
 - **FFmpeg conversion** to MP3 with a conversion progress indicator
 - **Transcription** via OpenRouter's speech-to-text model
 - **Summarisation** using the same model with a bullet-point prompt
+- **Batch processing** – process multiple videos from a text file
 - **Rich console logging** for clear, colour-coded messages
 - **Standard development workflow** – lint (`ruff`), format (`black`), and test (`pytest`)
 
@@ -39,7 +40,24 @@ python -m src.cli --url "..." --no-summary
 
 # Specify a custom output directory
 python -m src.cli --url "..." --out-dir ./data
+
+# Batch processing – process multiple videos from a file
+python -m src.cli --batch-file urls.txt --out-dir ./data
 ```
+
+### Batch file format
+
+Create a text file with one YouTube URL per line. Lines starting with `#` are treated as comments, and empty lines are ignored:
+
+```
+# My video list
+https://www.youtube.com/watch?v=video1
+https://youtu.be/video2
+https://www.youtube.com/watch?v=video3
+```
+
+The CLI will process each video in sequence, logging errors without stopping the batch.
+
 The CLI will display `tqdm` bars for the download and conversion steps and log the transcription and summarisation stages with `rich`.
 
 ## Development

@@ -46,9 +46,36 @@ def validate_youtube_url(url: str) -> None:
         )
 
 
+def read_urls_from_file(path: Path) -> list[str]:
+    """Read YouTube URLs from a text file, one per line.
+
+    Args:
+        path: Path to the file containing URLs
+
+    Returns:
+        List of validated URL strings
+
+    Raises:
+        ValueError: If any URL in the file is invalid
+    """
+    urls = []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        validate_youtube_url(line)
+        urls.append(line)
+    if not urls:
+        raise ValueError(f"No valid URLs found in {path}")
+    return urls
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Download, transcribe, and optionally summarise a YouTube video.")
-    parser.add_argument("--url", required=True, help="YouTube video URL to process")
+    parser = argparse.ArgumentParser(description="Download, transcribe, and optionally summarise YouTube videos.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--url", help="YouTube video URL to process")
+    group.add_argument("--batch-file", type=Path, help="Text file with one YouTube URL per line")
     parser.add_argument(
         "--out-dir",
         default="output",
@@ -62,51 +89,78 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
+def process_single_url(url: str, out_dir: Path, no_summary: bool) -> bool:
+    """Process a single YouTube URL: download, transcribe, and optionally summarize.
 
-    # Validate URL before doing any work
+    Args:
+        url: YouTube video URL to process
+        out_dir: Output directory for files
+        no_summary: If True, skip summary generation
+
+    Returns:
+        True on success, False on error
+    """
     try:
-        validate_youtube_url(args.url)
-    except ValueError as exc:
-        logger.error(f"Invalid input: {exc}")
-        console.print(f"[red]Error:[/] {exc}")
-        return 1
-
-    out_dir = Path(args.out_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        console.print("[bold cyan]Starting YouTube audio download…[/]")
-        audio_path = download_audio(args.url, out_dir)
+        console.print(f"[bold cyan]Processing:[/] {url}")
+        audio_path = download_audio(url, out_dir)
         console.print(f"[green]Audio saved to:[/] {audio_path}")
 
         console.print("[bold cyan]Transcribing audio…[/]")
         transcript = transcribe(audio_path)
-        # Save transcript - use the same base name as the audio file (without extension)
-        base_name = Path(audio_path).stem  # This already contains the date prefix from slugify
+        base_name = Path(audio_path).stem
         _save_transcript(transcript, out_dir, base_name)
 
-        if not args.no_summary:
+        if not no_summary:
             console.print("[bold cyan]Generating summary…[/]")
             _save_summary(transcript, out_dir, base_name)
-        else:
-            console.print("[yellow]Summary step skipped as requested.[/]")
 
-        console.print("[bold green]All done![/]")
-        return 0
+        console.print("[bold green]Complete![/]")
+        return True
     except KeyboardInterrupt:
         logger.info("Process interrupted by user")
         console.print("[yellow]Process interrupted by user[/]")
-        return 1
-    except FileNotFoundError as exc:
-        logger.error(f"File not found: {exc}")
+        raise
+    except (FileNotFoundError, PermissionError) as exc:
+        logger.error(f"Error: {exc}")
         console.print(f"[red]Error:[/] {exc}")
-        return 1
-    except PermissionError as exc:
-        logger.error(f"Permission denied: {exc}")
+        return False
+    except Exception as exc:
+        logger.error(f"Unexpected error: {exc}")
         console.print(f"[red]Error:[/] {exc}")
-        return 1
+        return False
+
+
+def main() -> int:
+    args = parse_args()
+
+    out_dir = Path(args.out_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.url:
+        if not process_single_url(args.url, out_dir, args.no_summary):
+            return 1
+        return 0
+
+    if args.batch_file:
+        try:
+            urls = read_urls_from_file(args.batch_file)
+        except (FileNotFoundError, ValueError) as exc:
+            logger.error(f"Batch file error: {exc}")
+            console.print(f"[red]Error:[/] {exc}")
+            return 1
+
+        console.print(f"[bold cyan]Processing {len(urls)} video(s)…[/]")
+        successes = 0
+        for url in urls:
+            if process_single_url(url, out_dir, args.no_summary):
+                successes += 1
+            else:
+                console.print(f"[yellow]Skipping to next video…[/]")
+
+        console.print(f"[bold green]Batch complete:[/] {successes}/{len(urls)} successful")
+        return 0
+
+    return 1
 
 
 def _save_transcript(transcript: str, out_dir: Path, base_name: str) -> None:
