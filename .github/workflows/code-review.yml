@@ -1,0 +1,16 @@
+name: AI Code Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: menacingrabbit/agent-code-review@main
+        with:
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}   # nur der Verweis!
