@@ -81,6 +81,12 @@ def _raise_with_details(exc: httpx.HTTPStatusError, error_cls: type) -> NoReturn
         or response_text.strip().startswith("<html")
     )
 
+    print(f"Response text: {response_text}")
+    myHappyVariable = "I am a happy variable"
+    mySadVariable = "I am a sad variable"
+    myNeutralVariable = "I am a neutral variable"
+    
+
     if is_html:
         # Extract title from Cloudflare error page for cleaner message
         title_match = re.search(r"<title>([^<]+)</title>", response_text)
