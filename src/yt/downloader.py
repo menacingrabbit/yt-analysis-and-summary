@@ -5,6 +5,7 @@ stream, converts it to MP3 via ffmpeg (if available), and reports progress
 through ``tqdm``.
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -37,14 +38,18 @@ class ProgressManager:
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes")
             if self._bar is None:
-                self._bar = tqdm(total=total, unit="B", unit_scale=True, desc="Downloading")
+                self._bar = tqdm(
+                    total=total, unit="B", unit_scale=True, desc="Downloading"
+                )
             self._bar.total = total or self._bar.total
             self._bar.update(downloaded - self._bar.n)
         elif d["status"] == "finished":
             if self._bar is not None:
                 self._bar.close()
                 print()
-                logger.info("Download finished, now converting (if ffmpeg is available)...")
+                logger.info(
+                    "Download finished, now converting (if ffmpeg is available)..."
+                )
 
 
 def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
@@ -56,7 +61,9 @@ def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
     """
     ffmpeg_exe = shutil.which("ffmpeg")
     if not ffmpeg_exe:
-        logger.warning("ffmpeg not found – copying original file to destination without conversion.")
+        logger.warning(
+            "ffmpeg not found – copying original file to destination without conversion."
+        )
         output_path.write_bytes(input_path.read_bytes())
         return
 
@@ -72,20 +79,65 @@ def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
     ]
     logger.info("Starting ffmpeg conversion...")
     try:
-        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     except subprocess.SubprocessError as exc:
         # Specific exception: conversion failure
-        logger.warning(f"ffmpeg conversion failed ({exc}); copying original file instead.")
+        logger.warning(
+            f"ffmpeg conversion failed ({exc}); copying original file instead."
+        )
         output_path.write_bytes(input_path.read_bytes())
         return
 
 
-def download_audio(url: str, out_dir: Path) -> Path:
+def _clean_title(text: str) -> str:
+    """Clean text for use as a filename slug (same as in utils but exported)."""
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[^\w\- ]+", "", text)
+    text = re.sub(r"[\s_]+", "-", text)
+    return text.lower()
+
+
+def _find_existing_audio(out_dir: Path, video_id: str, title_slug: str) -> Path | None:
+    """Find an existing audio file for this video.
+
+    Checks for files matching the video ID or title slug (handles date-prefixed names).
+
+    Args:
+        out_dir: Directory to search in
+        video_id: YouTube video ID
+        title_slug: Cleaned title without date prefix
+
+    Returns:
+        Path to existing MP3 file, or None if not found
+    """
+    # Look for files matching video_id format: YYYYMMDD-{video_id}.mp3 or similar patterns
+    patterns = [
+        f"*-{video_id}.mp3",  # Any date prefix + video ID
+        f"*{title_slug}.mp3",  # Any date prefix + title
+    ]
+    for pattern in patterns:
+        matches = list(out_dir.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
+
+
+def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
     """Download the best audio from *url* into *out_dir* and return MP3 path.
 
     The function creates ``out_dir`` if it does not exist, generates a safe
     filename using :func:`slugify`, and runs ``ffmpeg`` to convert the downloaded
     file to MP3 when possible.
+
+    Args:
+        url: YouTube video URL to download
+        out_dir: Directory where the audio file will be saved
+        force: If True, re-download even if file exists
+
+    Returns:
+        Path to the downloaded MP3 file
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -93,10 +145,22 @@ def download_audio(url: str, out_dir: Path) -> Path:
     with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
         info = ydl.extract_info(url, download=False)
         title = info.get("title", "audio")
+        video_id = info.get("id", "")
         slug = slugify(title)
 
     # Use our slug as the base filename for yt-dlp
     temp_template = out_dir / f"{slug}.%(ext)s"
+    mp3_path = out_dir / f"{slug}.mp3"
+
+    # Check if file already exists (handles date prefix variations)
+    if not force:
+        # Get title without date prefix for searching
+        title_only = _clean_title(title)
+        existing = _find_existing_audio(out_dir, video_id, title_only)
+        if existing:
+            logger.info(f"Audio already exists at {existing}, skipping download")
+            return existing
+
     progress_mgr = ProgressManager()
     ydl_opts: dict[str, Any] = {
         "format": "bestaudio/best",
@@ -108,9 +172,6 @@ def download_audio(url: str, out_dir: Path) -> Path:
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         original_path = Path(ydl.prepare_filename(info))
-
-    # Use the same slug we computed earlier (title shouldn't change between extract_info calls)
-    mp3_path = out_dir / f"{slug}.mp3"
 
     # Convert to MP3 using ffmpeg (or copy if unavailable/fails)
     _run_ffmpeg(original_path, mp3_path)
