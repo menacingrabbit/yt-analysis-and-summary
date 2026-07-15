@@ -115,7 +115,7 @@ def process_single_url(
     try:
         console.print(f"[bold cyan]Processing:[/] {url}")
         audio_path = download_audio(url, out_dir, force=force)
-        console.print(f"[green]Audio saved to:[/] {audio_path}")
+        console.print(f"[green]Audio ready at:[/] {audio_path}")
 
         console.print("[bold cyan]Transcribing audio…[/]")
         transcript = transcribe(audio_path)

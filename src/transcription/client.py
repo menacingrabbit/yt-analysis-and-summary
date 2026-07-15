@@ -11,7 +11,6 @@ network issues.
 import os
 import base64
 import re
-import json
 from pathlib import Path
 from typing import Any, Dict, NoReturn
 
@@ -145,18 +144,13 @@ def _post_audio_json(audio_path: Path, model: str) -> Dict[str, Any]:
     # Determine format from file extension; default to "wav" if unknown.
     fmt = audio_path.suffix.lstrip(".").lower() or "wav"
 
-    data = json.dumps({
-        "model": model,
-        "input_audio": {"data": audio_b64, "format": fmt},
-    })
-
     payload = {
         "model": model,
         "input_audio": {"data": audio_b64, "format": fmt},
     }
 
     response = httpx.post(
-        url=_AUDIO_API_URL,
+        _AUDIO_API_URL,
         headers={**_get_headers(), "Content-Type": "application/json"},
         json=payload,
         timeout=60.0,

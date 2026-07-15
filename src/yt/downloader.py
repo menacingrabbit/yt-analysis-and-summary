@@ -5,7 +5,6 @@ stream, converts it to MP3 via ffmpeg (if available), and reports progress
 through ``tqdm``.
 """
 
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,7 +13,7 @@ from typing import Any
 from yt_dlp import YoutubeDL
 from tqdm import tqdm
 
-from .utils import slugify
+from .utils import slugify, _clean
 from ..utils.logging import logger
 
 
@@ -91,14 +90,6 @@ def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
         return
 
 
-def _clean_title(text: str) -> str:
-    """Clean text for use as a filename slug (same as in utils but exported)."""
-    text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"[^\w\- ]+", "", text)
-    text = re.sub(r"[\s_]+", "-", text)
-    return text.lower()
-
-
 def _find_existing_audio(out_dir: Path, video_id: str, title_slug: str) -> Path | None:
     """Find an existing audio file for this video.
 
@@ -150,12 +141,12 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
 
     # Use our slug as the base filename for yt-dlp
     temp_template = out_dir / f"{slug}.%(ext)s"
-    mp3_path = out_dir / f"{slug}.mp3"
+    mp3_path = out_dir / f"{slug}-{video_id}.mp3"
 
     # Check if file already exists (handles date prefix variations)
     if not force:
         # Get title without date prefix for searching
-        title_only = _clean_title(title)
+        title_only = _clean(title)
         existing = _find_existing_audio(out_dir, video_id, title_only)
         if existing:
             logger.info(f"Audio already exists at {existing}, skipping download")
