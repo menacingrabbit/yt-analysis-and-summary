@@ -85,4 +85,4 @@ pytest
   - `OPENROUTER_SUMMARISE_MODEL`
 
 ## License
-MIT License
+A beautiful liscence
