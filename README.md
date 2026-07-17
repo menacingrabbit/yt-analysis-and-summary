@@ -85,4 +85,7 @@ pytest
   - `OPENROUTER_SUMMARISE_MODEL`
 
 ## License
-MIT License
+MIT License updated.
+
+## Author
+Guybrush Threepwood
