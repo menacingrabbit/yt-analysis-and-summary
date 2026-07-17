@@ -111,7 +111,9 @@ def _find_existing_audio(out_dir: Path, video_id: str, title_slug: str) -> Path 
     for pattern in patterns:
         matches = list(out_dir.glob(pattern))
         if matches:
-            return matches[0]
+            # glob order is unspecified; prefer the most recently modified file
+            # so resume picks the latest download rather than a stale one.
+            return max(matches, key=lambda p: p.stat().st_mtime)
     return None
 
 
@@ -141,7 +143,10 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
 
     # Use our slug as the base filename for yt-dlp
     temp_template = out_dir / f"{slug}.%(ext)s"
-    mp3_path = out_dir / f"{slug}-{video_id}.mp3"
+    # Append the video ID when available; fall back to slug-only if it's missing
+    # (avoids a dangling "-.mp3" name and a degenerate "*-.mp3" resume glob).
+    id_suffix = f"-{video_id}" if video_id else ""
+    mp3_path = out_dir / f"{slug}{id_suffix}.mp3"
 
     # Check if file already exists (handles date prefix variations)
     if not force:
