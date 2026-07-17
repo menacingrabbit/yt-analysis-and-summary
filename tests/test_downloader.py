@@ -64,3 +64,68 @@ def test_mp3_name_includes_id_when_present_and_falls_back_without():
         dl._audio_mp3_name("20260717-clean-title", "abc123")
         == "20260717-clean-title-abc123.mp3"
     )
+
+
+def _make_fake_ydl(info, spy, tmp_path):
+    """Fake yt_dlp.YoutubeDL: extract_info returns *info* and records downloads.
+
+    prepare_filename yields a real temp file so download_audio's later
+    original_path.unlink() succeeds without ffmpeg.
+    """
+
+    class _FakeYDL:
+        def __init__(self, opts=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download=False):
+            if download:
+                spy["downloaded"] = True
+            return info
+
+        def prepare_filename(self, info):
+            p = tmp_path / "downloaded-temp.webm"
+            p.write_bytes(b"")
+            return str(p)
+
+    return _FakeYDL()
+
+
+def test_download_audio_resumes_when_file_exists_empty_id(tmp_path, mocker):
+    # YouTube returns no id -> written file keeps the slugify date prefix.
+    info = {"title": "Clean Title", "id": ""}
+    spy = {"downloaded": False}
+    mocker.patch(
+        "src.yt.downloader.YoutubeDL",
+        return_value=_make_fake_ydl(info, spy, tmp_path),
+    )
+
+    # Simulate a prior run having written the resume file (date prefix from slugify).
+    existing = tmp_path / dl._audio_mp3_name(dl.slugify("Clean Title"), "")
+    existing.write_bytes(b"")
+
+    result = dl.download_audio("https://youtu.be/abc", tmp_path)
+
+    assert result == existing
+    assert spy["downloaded"] is False  # resume skipped the actual download
+
+
+def test_download_audio_downloads_when_file_absent_empty_id(tmp_path, mocker):
+    info = {"title": "Clean Title", "id": ""}
+    spy = {"downloaded": False}
+    mocker.patch(
+        "src.yt.downloader.YoutubeDL",
+        return_value=_make_fake_ydl(info, spy, tmp_path),
+    )
+    mocker.patch("src.yt.downloader._run_ffmpeg")  # no ffmpeg in test env
+
+    result = dl.download_audio("https://youtu.be/abc", tmp_path)
+
+    expected = tmp_path / dl._audio_mp3_name(dl.slugify("Clean Title"), "")
+    assert result == expected
+    assert spy["downloaded"] is True  # no existing file -> real download attempted
