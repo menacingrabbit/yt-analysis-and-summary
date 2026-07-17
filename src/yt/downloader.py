@@ -5,6 +5,7 @@ stream, converts it to MP3 via ffmpeg (if available), and reports progress
 through ``tqdm``.
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -90,10 +91,28 @@ def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
         return
 
 
+# Leading YYYYMMDD- date prefix that slugify() prepends to filenames.
+_DATE_PREFIX_RE = re.compile(r"^\d{8}-")
+
+
+def _audio_mp3_name(slug: str, video_id: str) -> str:
+    """Return the MP3 filename (with extension) for a download.
+
+    Includes the video ID when available so the file is uniquely identifiable
+    for resume detection; otherwise falls back to the slug alone.
+    """
+    stem = f"{slug}-{video_id}" if video_id else slug
+    return f"{stem}.mp3"
+
+
 def _find_existing_audio(out_dir: Path, video_id: str, title_slug: str) -> Path | None:
     """Find an existing audio file for this video.
 
-    Checks for files matching the video ID or title slug (handles date-prefixed names).
+    Matching is keyed on the video ID (unique and stable) when present. For
+    legacy files written before the video ID was part of the filename, a
+    best-effort fallback matches by *exact* cleaned title only, after stripping
+    the date prefix. The previous loose suffix match could collide with
+    unrelated videos that share a title fragment.
 
     Args:
         out_dir: Directory to search in
@@ -101,19 +120,25 @@ def _find_existing_audio(out_dir: Path, video_id: str, title_slug: str) -> Path 
         title_slug: Cleaned title without date prefix
 
     Returns:
-        Path to existing MP3 file, or None if not found
+        Path to the most recently modified matching MP3 file, or None.
     """
-    # Look for files matching video_id format: YYYYMMDD-{video_id}.mp3 or similar patterns
-    patterns = [
-        f"*-{video_id}.mp3",  # Any date prefix + video ID
-        f"*{title_slug}.mp3",  # Any date prefix + title
-    ]
-    for pattern in patterns:
-        matches = list(out_dir.glob(pattern))
-        if matches:
-            # glob order is unspecified; prefer the most recently modified file
-            # so resume picks the latest download rather than a stale one.
-            return max(matches, key=lambda p: p.stat().st_mtime)
+    matches: list[Path] = []
+    if video_id:
+        # Precise, unique match on the stable video ID.
+        matches = list(out_dir.glob(f"*-{video_id}.mp3"))
+
+    if not matches and title_slug:
+        # Legacy fallback: glob by title, then keep only exact-title matches so a
+        # video whose clean title is a substring of another's is not resumed.
+        for cand in out_dir.glob(f"*{title_slug}.mp3"):
+            stem = _DATE_PREFIX_RE.sub("", cand.stem)
+            if stem == title_slug:
+                matches.append(cand)
+
+    if matches:
+        # glob order is unspecified; prefer the most recently modified file so
+        # resume picks the latest download rather than a stale one.
+        return max(matches, key=lambda p: p.stat().st_mtime)
     return None
 
 
@@ -143,10 +168,7 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
 
     # Use our slug as the base filename for yt-dlp
     temp_template = out_dir / f"{slug}.%(ext)s"
-    # Append the video ID when available; fall back to slug-only if it's missing
-    # (avoids a dangling "-.mp3" name and a degenerate "*-.mp3" resume glob).
-    id_suffix = f"-{video_id}" if video_id else ""
-    mp3_path = out_dir / f"{slug}{id_suffix}.mp3"
+    mp3_path = out_dir / _audio_mp3_name(slug, video_id)
 
     # Check if file already exists (handles date prefix variations)
     if not force:
