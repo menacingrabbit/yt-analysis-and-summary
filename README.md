@@ -9,6 +9,9 @@ A small Python CLI that downloads a YouTube video's audio, transcribes it with O
 - **Summarisation** using the same model with a bullet-point prompt
 - **Batch processing** – process multiple videos from a text file
 - **Rich console logging** for clear, colour-coded messages
+- **Resume support** – skips download if audio file already exists (use `--force` to re-download)
+- **Retry with visibility** – automatic retries with progress logging for transient API errors
+- **Better error messages** – user-friendly hints for common HTTP errors (502, 429, 401, etc.)
 - **Standard development workflow** – lint (`ruff`), format (`black`), and test (`pytest`)
 
 ## Prerequisites
@@ -40,6 +43,9 @@ python -m src.cli --url "..." --no-summary
 
 # Specify a custom output directory
 python -m src.cli --url "..." --out-dir ./data
+
+# Force re-download even if audio file exists
+python -m src.cli --url "..." --force
 
 # Batch processing – process multiple videos from a file
 python -m src.cli --batch-file urls.txt --out-dir ./data
@@ -79,4 +85,7 @@ pytest
   - `OPENROUTER_SUMMARISE_MODEL`
 
 ## License
-MIT License
+MIT License updated.
+
+## Author
+Guybrush Threepwood

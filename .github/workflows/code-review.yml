@@ -14,3 +14,5 @@ jobs:
       - uses: menacingrabbit/agent-code-review@main
         with:
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}   # nur der Verweis!
+          model: tencent/hy3:free          # optional        
+          prompt-extra: "Classify the code for severity (high, medium, low)" # optional

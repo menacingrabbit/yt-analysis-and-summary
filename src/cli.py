@@ -72,10 +72,14 @@ def read_urls_from_file(path: Path) -> list[str]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Download, transcribe, and optionally summarise YouTube videos.")
+    parser = argparse.ArgumentParser(
+        description="Download, transcribe, and optionally summarise YouTube videos."
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--url", help="YouTube video URL to process")
-    group.add_argument("--batch-file", type=Path, help="Text file with one YouTube URL per line")
+    group.add_argument(
+        "--batch-file", type=Path, help="Text file with one YouTube URL per line"
+    )
     parser.add_argument(
         "--out-dir",
         default="output",
@@ -86,24 +90,32 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip the summarisation step and only produce a transcript",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download audio even if file already exists",
+    )
     return parser.parse_args()
 
 
-def process_single_url(url: str, out_dir: Path, no_summary: bool) -> bool:
+def process_single_url(
+    url: str, out_dir: Path, no_summary: bool, force: bool = False
+) -> bool:
     """Process a single YouTube URL: download, transcribe, and optionally summarize.
 
     Args:
         url: YouTube video URL to process
         out_dir: Output directory for files
         no_summary: If True, skip summary generation
+        force: If True, re-download audio even if file exists
 
     Returns:
         True on success, False on error
     """
     try:
         console.print(f"[bold cyan]Processing:[/] {url}")
-        audio_path = download_audio(url, out_dir)
-        console.print(f"[green]Audio saved to:[/] {audio_path}")
+        audio_path = download_audio(url, out_dir, force=force)
+        console.print(f"[green]Audio ready at:[/] {audio_path}")
 
         console.print("[bold cyan]Transcribing audio…[/]")
         transcript = transcribe(audio_path)
@@ -137,7 +149,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.url:
-        if not process_single_url(args.url, out_dir, args.no_summary):
+        if not process_single_url(args.url, out_dir, args.no_summary, args.force):
             return 1
         return 0
 
@@ -152,12 +164,14 @@ def main() -> int:
         console.print(f"[bold cyan]Processing {len(urls)} video(s)…[/]")
         successes = 0
         for url in urls:
-            if process_single_url(url, out_dir, args.no_summary):
+            if process_single_url(url, out_dir, args.no_summary, args.force):
                 successes += 1
             else:
                 console.print(f"[yellow]Skipping to next video…[/]")
 
-        console.print(f"[bold green]Batch complete:[/] {successes}/{len(urls)} successful")
+        console.print(
+            f"[bold green]Batch complete:[/] {successes}/{len(urls)} successful"
+        )
         return 0
 
     return 1

@@ -143,10 +143,12 @@ def _post_audio_json(audio_path: Path, model: str) -> Dict[str, Any]:
     audio_b64 = base64.b64encode(audio_bytes).decode()
     # Determine format from file extension; default to "wav" if unknown.
     fmt = audio_path.suffix.lstrip(".").lower() or "wav"
+
     payload = {
         "model": model,
         "input_audio": {"data": audio_b64, "format": fmt},
     }
+
     response = httpx.post(
         _AUDIO_API_URL,
         headers={**_get_headers(), "Content-Type": "application/json"},
