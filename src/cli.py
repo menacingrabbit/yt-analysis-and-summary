@@ -96,7 +96,7 @@ def parse_args() -> argparse.Namespace:
         help="Re-download audio even if file already exists",
     )
     parser.add_argument(
-        "--splitt",
+        "--split",
         action="store_true",
         help=(
             "Split audio into <10-minute chunks before transcribing. "
@@ -111,7 +111,7 @@ def process_single_url(
     out_dir: Path,
     no_summary: bool,
     force: bool = False,
-    splitt: bool = False,
+    split: bool = False,
 ) -> bool:
     """Process a single YouTube URL: download, transcribe, and optionally summarize.
 
@@ -120,7 +120,7 @@ def process_single_url(
         out_dir: Output directory for files
         no_summary: If True, skip summary generation
         force: If True, re-download audio even if file exists
-        splitt: If True, split audio into <10-min chunks before transcribing
+        split: If True, split audio into <10-min chunks before transcribing
 
     Returns:
         True on success, False on error
@@ -131,7 +131,7 @@ def process_single_url(
         console.print(f"[green]Audio ready at:[/] {audio_path}")
 
         console.print("[bold cyan]Transcribing audio…[/]")
-        if splitt:
+        if split:
             transcript = transcribe_split(audio_path)
         else:
             transcript = transcribe(audio_path)
@@ -166,7 +166,7 @@ def main() -> int:
 
     if args.url:
         if not process_single_url(
-            args.url, out_dir, args.no_summary, args.force, args.splitt
+            args.url, out_dir, args.no_summary, args.force, args.split
         ):
             return 1
         return 0
@@ -183,7 +183,7 @@ def main() -> int:
         successes = 0
         for url in urls:
             if process_single_url(
-                url, out_dir, args.no_summary, args.force, args.splitt
+                url, out_dir, args.no_summary, args.force, args.split
             ):
                 successes += 1
             else:
