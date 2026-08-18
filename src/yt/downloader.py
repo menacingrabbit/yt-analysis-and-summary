@@ -159,8 +159,13 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Extract info once to get the title and generate our slug
-    with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+    # Extract info once to get the title and generate our slug.
+    # Use the ANDROID player client — YouTube frequently blocks stream
+    # downloads via the default ANDROID_VR client with HTTP 403, while
+    # ANDROID remains accessible. See tests/test_youtube_api_access.py.
+    with YoutubeDL(
+        {"quiet": True, "no_warnings": True, "extractor_args": {"youtube": {"player_client": ["ANDROID"]}}}
+    ) as ydl:
         info = ydl.extract_info(url, download=False)
         title = info.get("title", "audio")
         video_id = info.get("id", "")
@@ -186,6 +191,9 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
         "progress_hooks": [progress_mgr.hook],
         "quiet": True,
         "no_warnings": True,
+        # ANDROID client avoids the HTTP 403 that YouTube returns for
+        # ANDROID_VR stream downloads.
+        "extractor_args": {"youtube": {"player_client": ["ANDROID"]}},
     }
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
