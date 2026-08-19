@@ -1,180 +1,110 @@
 """Tests for src.transcription.client — especially transcribe_split."""
 
-from pathlib import Path
-
 import pytest
 
-from src.transcription.client import transcribe_split
+from src.audio.splitter import DEFAULT_CHUNK_DURATION
+from src.transcription.client import (
+    RETRYABLE_STATUSES,
+    TransientTranscriptionError,
+    TranscriptionError,
+    transcribe_split,
+)
 
 
 class TestTranscribeSplit:
     """Tests for the transcribe_split function."""
 
-    def test_transcribe_split_multiple_chunks(self, tmp_path):
-        """Splitting should transcribe each chunk and concatenate results."""
-        audio = tmp_path / "long.mp3"
-        audio.write_bytes(b"")
+    def test_multiple_chunks_concatenated_in_order(
+        self, audio_file, chunk_files, transcription_ctx
+    ):
+        """Each chunk is transcribed and the results concatenated with headers."""
+        audio = audio_file("long.mp3")
+        _, chunks = chunk_files(3)
+        transcription_ctx.split_audio.return_value = chunks
+        transcription_ctx.transcribe.side_effect = [f"text-{i}" for i in range(1, 4)]
 
-        chunk1 = tmp_path / "part_000.mp3"
-        chunk2 = tmp_path / "part_001.mp3"
-        chunk3 = tmp_path / "part_002.mp3"
-        chunk1.write_bytes(b"")
-        chunk2.write_bytes(b"")
-        chunk3.write_bytes(b"")
+        result = transcribe_split(audio)
 
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "src.audio.splitter.split_audio",
-                lambda path, chunk_duration=590: [chunk1, chunk2, chunk3],
-            )
-            mp.setattr("src.audio.splitter.cleanup_chunks", lambda chunks: None)
-            mp.setattr(
-                "src.transcription.client.transcribe",
-                lambda path: {
-                    chunk1: "First part text",
-                    chunk2: "Second part text",
-                    chunk3: "Third part text",
-                }[path],
-            )
+        assert (
+            result.index("--- Part 1 ---\ntext-1")
+            < result.index("--- Part 2 ---\ntext-2")
+            < result.index("--- Part 3 ---\ntext-3")
+        )
 
-            result = transcribe_split(audio, chunk_duration=590)
+    def test_single_chunk_calls_transcribe_directly(self, audio_file, transcription_ctx):
+        """A file that is not split is transcribed directly and not cleaned up."""
+        audio = audio_file("short.mp3")
+        transcription_ctx.split_audio.return_value = [audio]
+        transcription_ctx.transcribe.return_value = "Full transcript"
 
-        assert "--- Part 1 ---" in result
-        assert "First part text" in result
-        assert "--- Part 2 ---" in result
-        assert "Second part text" in result
-        assert "--- Part 3 ---" in result
-        assert "Third part text" in result
-
-    def test_transcribe_split_single_chunk_calls_transcribe(self, tmp_path):
-        """When the file is short enough, transcribe_split calls transcribe directly."""
-        audio = tmp_path / "short.mp3"
-        audio.write_bytes(b"")
-
-        called_with = []
-
-        def fake_split(path, chunk_duration=590):
-            return [path]  # same file, no split needed
-
-        def fake_transcribe(path):
-            called_with.append(path)
-            return "Full transcript"
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("src.audio.splitter.split_audio", fake_split)
-            cleanup_called = []
-            mp.setattr(
-                "src.audio.splitter.cleanup_chunks",
-                lambda chunks: cleanup_called.append(True),
-            )
-            mp.setattr("src.transcription.client.transcribe", fake_transcribe)
-
-            result = transcribe_split(audio, chunk_duration=590)
+        result = transcribe_split(audio)
 
         assert result == "Full transcript"
-        assert called_with == [audio]
-        assert cleanup_called == [], "cleanup_chunks should not be called for single chunk"
+        transcription_ctx.transcribe.assert_called_once_with(audio)
+        transcription_ctx.cleanup_chunks.assert_not_called()
 
-    def test_transcribe_split_preserves_order(self, tmp_path):
-        """Parts must appear in the correct order in the combined transcript."""
-        audio = tmp_path / "video.mp3"
-        audio.write_bytes(b"")
+    def test_empty_text_chunks_are_skipped(self, audio_file, chunk_files, transcription_ctx):
+        """Empty transcripts from a chunk do not produce an empty section."""
+        audio = audio_file("video.mp3")
+        _, chunks = chunk_files(2)
+        transcription_ctx.split_audio.return_value = chunks
+        transcription_ctx.transcribe.side_effect = ["Some text", ""]
 
-        chunks = [tmp_path / f"part_{i:03d}.mp3" for i in range(3)]
-        for c in chunks:
-            c.write_bytes(b"")
-
-        def fake_transcribe(path):
-            idx = chunks.index(path)
-            return f"part-{idx + 1}"
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "src.audio.splitter.split_audio",
-                lambda path, chunk_duration=590: chunks,
-            )
-            mp.setattr("src.audio.splitter.cleanup_chunks", lambda chunks: None)
-            mp.setattr("src.transcription.client.transcribe", fake_transcribe)
-
-            result = transcribe_split(audio)
-
-        assert result.index("part-1") < result.index("part-2") < result.index("part-3")
-
-    def test_transcribe_split_handles_empty_transcript(self, tmp_path):
-        """Empty transcripts from a chunk should not break the combination."""
-        audio = tmp_path / "video.mp3"
-        audio.write_bytes(b"")
-
-        chunks = [tmp_path / "part_000.mp3", tmp_path / "part_001.mp3"]
-        for c in chunks:
-            c.write_bytes(b"")
-
-        def fake_transcribe(path):
-            return "Some text" if path == chunks[0] else ""
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "src.audio.splitter.split_audio",
-                lambda path, chunk_duration=590: chunks,
-            )
-            mp.setattr("src.audio.splitter.cleanup_chunks", lambda chunks: None)
-            mp.setattr("src.transcription.client.transcribe", fake_transcribe)
-
-            result = transcribe_split(audio)
+        result = transcribe_split(audio)
 
         assert "Some text" in result
-        # Empty part should not produce a "--- Part 2 ---" section
         assert "--- Part 2 ---" not in result
 
-    def test_transcribe_split_default_chunk_duration(self, tmp_path):
-        """Default chunk duration should be 590 seconds."""
-        from src.audio.splitter import _DEFAULT_CHUNK_DURATION
+    def test_default_chunk_duration(self, audio_file, transcription_ctx):
+        """The default chunk duration matches the splitter's constant."""
+        audio = audio_file("video.mp3")
+        transcription_ctx.split_audio.return_value = [audio]
 
-        audio = tmp_path / "video.mp3"
-        audio.write_bytes(b"")
+        transcribe_split(audio)
 
-        captured = {}
+        assert (
+            transcription_ctx.split_audio.call_args.kwargs["chunk_duration"]
+            == DEFAULT_CHUNK_DURATION
+        )
 
-        def fake_split(path, chunk_duration=590):
-            captured["chunk_duration"] = chunk_duration
-            return [path]
+    def test_cleanup_called_after_split(self, audio_file, chunk_files, transcription_ctx):
+        """cleanup_chunks is invoked with the produced chunks when splitting."""
+        audio = audio_file("video.mp3")
+        _, chunks = chunk_files(2)
+        transcription_ctx.split_audio.return_value = chunks
+        transcription_ctx.transcribe.side_effect = ["a", "b"]
 
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("src.audio.splitter.split_audio", fake_split)
-            mp.setattr("src.audio.splitter.cleanup_chunks", lambda chunks: None)
-            mp.setattr("src.transcription.client.transcribe", lambda path: "text")
+        transcribe_split(audio)
 
+        transcription_ctx.cleanup_chunks.assert_called_once_with(chunks)
+
+    def test_cleanup_runs_even_if_chunk_fails_disabled(
+        self, audio_file, chunk_files, transcription_ctx
+    ):
+        """A transient chunk failure still cleans up (transcribe_split is not retried)."""
+        audio = audio_file("video.mp3")
+        _, chunks = chunk_files(2)
+        transcription_ctx.split_audio.return_value = chunks
+        transcription_ctx.transcribe.side_effect = TransientTranscriptionError("boom")
+
+        with pytest.raises(TransientTranscriptionError):
             transcribe_split(audio)
 
-        assert captured["chunk_duration"] == _DEFAULT_CHUNK_DURATION
-        assert captured["chunk_duration"] == 590
+        transcription_ctx.cleanup_chunks.assert_called_once_with(chunks)
 
-    def test_transcribe_split_cleans_up_chunks(self, tmp_path):
-        """cleanup_chunks must be called after transcription when chunks exist."""
-        audio = tmp_path / "video.mp3"
-        audio.write_bytes(b"")
 
-        chunks = [tmp_path / f"part_{i:03d}.mp3" for i in range(2)]
-        for c in chunks:
-            c.write_bytes(b"")
+class TestTransientStatus:
+    """Transient vs permanent status classification."""
 
-        cleanup_called = []
+    def test_retryable_statuses_are_classified_transient(self):
+        for status in RETRYABLE_STATUSES:
+            assert status in {408, 429, 500, 502, 503, 504}
 
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "src.audio.splitter.split_audio",
-                lambda path, chunk_duration=590: chunks,
-            )
-            mp.setattr(
-                "src.audio.splitter.cleanup_chunks",
-                lambda cs: cleanup_called.append(list(cs)),
-            )
-            mp.setattr(
-                "src.transcription.client.transcribe",
-                lambda path: "text",
-            )
+    def test_permanent_status_not_in_transient(self):
+        assert 401 not in RETRYABLE_STATUSES
+        assert 400 not in RETRYABLE_STATUSES
 
-            transcribe_split(audio)
 
-        assert len(cleanup_called) == 1
-        assert cleanup_called[0] == chunks
+def test_imports_are_reachable():
+    """Sanity check for exception exports used across modules."""
+    assert issubclass(TranscriptionError, RuntimeError)

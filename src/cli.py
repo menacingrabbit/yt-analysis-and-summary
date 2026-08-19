@@ -1,4 +1,4 @@
-"""Command‑line entry point for the YouTube analysis tool.
+"""Command-line entry point for the YouTube analysis tool.
 
 Usage example:
     python -m src.cli --url "https://www.youtube.com/watch?v=..."
@@ -8,20 +8,22 @@ The CLI orchestrates:
 2. Transcribing the audio via OpenRouter.
 3. Optionally summarising the transcript.
 
-All steps are logged with rich‑styled output.
+All steps are logged with rich-styled output.
 """
 
 import argparse
+import logging
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Console
 
-from .yt.downloader import download_audio
-from .transcription.client import transcribe, transcribe_split
 from .summarisation.summariser import summarise_and_save
-from .utils.logging import logger
+from .transcription.client import transcribe, transcribe_split
+from .utils.logging import configure, logger
+from .yt.downloader import download_audio
 
 console = Console()
 
@@ -72,17 +74,17 @@ def read_urls_from_file(path: Path) -> list[str]:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Download, transcribe, and optionally summarise YouTube videos."
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--url", help="YouTube video URL to process")
-    group.add_argument(
-        "--batch-file", type=Path, help="Text file with one YouTube URL per line"
-    )
+    group.add_argument("--batch-file", type=Path, help="Text file with one YouTube URL per line")
     parser.add_argument(
         "--out-dir",
-        default="output",
+        type=Path,
+        default=Path("output"),
         help="Directory where audio, transcript and summary files will be stored (default: ./output)",
     )
     parser.add_argument(
@@ -103,42 +105,55 @@ def parse_args() -> argparse.Namespace:
             "Useful for long videos that exceed the transcription API limit."
         ),
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show debug-level log output",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Only show warnings and errors",
+    )
     return parser.parse_args()
 
 
-def process_single_url(
-    url: str,
-    out_dir: Path,
-    no_summary: bool,
-    force: bool = False,
-    split: bool = False,
-) -> bool:
-    """Process a single YouTube URL: download, transcribe, and optionally summarize.
+@dataclass
+class Options:
+    """Runtime options shared across single and batch processing."""
+
+    no_summary: bool
+    force: bool
+    split: bool
+
+
+def _options_from_args(args: argparse.Namespace) -> Options:
+    return Options(no_summary=args.no_summary, force=args.force, split=args.split)
+
+
+def process_single_url(url: str, out_dir: Path, opts: Options) -> bool:
+    """Process a single URL: download, transcribe, and optionally summarise.
 
     Args:
         url: YouTube video URL to process
         out_dir: Output directory for files
-        no_summary: If True, skip summary generation
-        force: If True, re-download audio even if file exists
-        split: If True, split audio into <10-min chunks before transcribing
+        opts: Processing options
 
     Returns:
         True on success, False on error
     """
     try:
         console.print(f"[bold cyan]Processing:[/] {url}")
-        audio_path = download_audio(url, out_dir, force=force)
+        audio_path = download_audio(url, out_dir, force=opts.force)
         console.print(f"[green]Audio ready at:[/] {audio_path}")
 
         console.print("[bold cyan]Transcribing audio…[/]")
-        if split:
-            transcript = transcribe_split(audio_path)
-        else:
-            transcript = transcribe(audio_path)
-        base_name = Path(audio_path).stem
+        transcript = transcribe_split(audio_path) if opts.split else transcribe(audio_path)
+
+        base_name = audio_path.stem
         _save_transcript(transcript, out_dir, base_name)
 
-        if not no_summary:
+        if not opts.no_summary:
             console.print("[bold cyan]Generating summary…[/]")
             _save_summary(transcript, out_dir, base_name)
 
@@ -146,81 +161,58 @@ def process_single_url(
         return True
     except KeyboardInterrupt:
         logger.info("Process interrupted by user")
-        console.print("[yellow]Process interrupted by user[/]")
         raise
-    except (FileNotFoundError, PermissionError) as exc:
-        logger.error(f"Error: {exc}")
-        console.print(f"[red]Error:[/] {exc}")
-        return False
     except Exception as exc:
-        logger.error(f"Unexpected error: {exc}")
-        console.print(f"[red]Error:[/] {exc}")
+        logger.error(f"Error: {exc}")
         return False
 
 
 def main() -> int:
+    """Run the CLI, returning a process exit code."""
     args = parse_args()
+    configure(logging.DEBUG if args.verbose else (logging.WARNING if args.quiet else logging.INFO))
 
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    opts = _options_from_args(args)
 
     if args.url:
-        if not process_single_url(
-            args.url, out_dir, args.no_summary, args.force, args.split
-        ):
-            return 1
-        return 0
-
-    if args.batch_file:
         try:
-            urls = read_urls_from_file(args.batch_file)
-        except (FileNotFoundError, ValueError) as exc:
-            logger.error(f"Batch file error: {exc}")
-            console.print(f"[red]Error:[/] {exc}")
+            validate_youtube_url(args.url)
+        except ValueError as exc:
+            logger.error(f"Error: {exc}")
             return 1
+        return 1 if not process_single_url(args.url, out_dir, opts) else 0
 
-        console.print(f"[bold cyan]Processing {len(urls)} video(s)…[/]")
-        successes = 0
-        for url in urls:
-            if process_single_url(
-                url, out_dir, args.no_summary, args.force, args.split
-            ):
-                successes += 1
-            else:
-                console.print(f"[yellow]Skipping to next video…[/]")
+    # Batch mode.
+    try:
+        urls = read_urls_from_file(args.batch_file)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error(f"Batch file error: {exc}")
+        return 1
 
-        console.print(
-            f"[bold green]Batch complete:[/] {successes}/{len(urls)} successful"
-        )
-        return 0
+    console.print(f"[bold cyan]Processing {len(urls)} video(s)…[/]")
+    successes = 0
+    for url in urls:
+        if process_single_url(url, out_dir, opts):
+            successes += 1
+        else:
+            console.print("[yellow]Skipping to next video…[/]")
 
-    return 1
+    console.print(f"[bold green]Batch complete:[/] {successes}/{len(urls)} successful")
+    return 0 if successes == len(urls) else 1
 
 
 def _save_transcript(transcript: str, out_dir: Path, base_name: str) -> None:
-    """Save transcript to file.
-
-    Args:
-        transcript: The transcript text to save
-        out_dir: Output directory
-        base_name: Base filename (without extension)
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
+    """Save the transcript to ``<base_name>_transcript.txt``."""
     transcript_path = out_dir / f"{base_name}_transcript.txt"
     transcript_path.write_text(transcript, encoding="utf-8")
     console.print(f"[green]Transcript written to:[/] {transcript_path}")
 
 
 def _save_summary(transcript: str, out_dir: Path, base_name: str) -> None:
-    """Generate and save summary to file.
-
-    Args:
-        transcript: The transcript text to summarize
-        out_dir: Output directory
-        base_name: Base filename (without extension)
-    """
-    summarise_and_save(transcript, out_dir, base_name)
-    summary_path = out_dir / f"{base_name}_summary.txt"
+    """Generate and save a summary, using the path returned by the summariser."""
+    summary_path = summarise_and_save(transcript, out_dir, base_name)
     console.print(f"[green]Summary written to:[/] {summary_path}")
 
 

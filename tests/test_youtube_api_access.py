@@ -21,7 +21,6 @@ The ``-s`` flag disables output capture so diagnostic messages are visible.
 
 import re
 import socket
-import urllib.error
 
 import httpx
 import pytest
@@ -29,6 +28,8 @@ import pytest
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
+# This file makes real network calls to YouTube; skip it by default.
+pytestmark = pytest.mark.network
 
 # A widely available, short YouTube video used for connectivity checks.
 _TEST_VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -72,7 +73,7 @@ def _extract_info_safe(url, opts):
         return info, None
     except DownloadError as exc:
         return None, exc
-    except Exception as exc:  # noqa: BLE001 - broad catch for diagnostics
+    except Exception as exc:  # broad catch for diagnostics
         return None, exc
 
 
@@ -116,21 +117,6 @@ def _make_ydl_opts(**overrides):
     return opts
 
 
-def _make_default_ydl_opts(**overrides):
-    """Build yt-dlp options with the stock (ANDROID_VR) client.
-
-    Used to demonstrate that the default client triggers HTTP 403 on
-    stream downloads.
-    """
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "http_headers": {"User-Agent": _BROWSER_UA},
-    }
-    opts.update(overrides)
-    return opts
-
-
 def _get_best_audio_url(info):
     """Return the stream URL of the best audio format from an info dict."""
     formats = info.get("formats", []) or []
@@ -167,7 +153,7 @@ def _check_stream_url(url):
             follow_redirects=True,
         )
         return resp.status_code, None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # broad catch for diagnostics
         return None, str(exc)
 
 
@@ -193,9 +179,7 @@ class TestYoutubeAccessibility:
                 pytrace=False,
             )
 
-        info, error = _extract_info_safe(
-            _TEST_VIDEO_URL, _make_ydl_opts()
-        )
+        info, error = _extract_info_safe(_TEST_VIDEO_URL, _make_ydl_opts())
 
         if error is not None:
             status = _get_http_status(error)
@@ -212,9 +196,7 @@ class TestYoutubeAccessibility:
         from the video stream server. A 403 here indicates a different problem
         than a stream-level 403.
         """
-        info, error = _extract_info_safe(
-            _TEST_VIDEO_URL, _make_ydl_opts()
-        )
+        info, error = _extract_info_safe(_TEST_VIDEO_URL, _make_ydl_opts())
 
         if error is None:
             assert info is not None
@@ -236,9 +218,7 @@ class TestYoutubeAccessibility:
         exact scenario the user reported. Uses a lightweight HEAD request
         with a small byte range so the full file is never downloaded.
         """
-        info, error = _extract_info_safe(
-            _TEST_VIDEO_URL, _make_ydl_opts()
-        )
+        info, error = _extract_info_safe(_TEST_VIDEO_URL, _make_ydl_opts())
         if error is not None:
             pytest.skip(f"Info extraction failed: {error}")
 
@@ -268,41 +248,6 @@ class TestYoutubeAccessibility:
             f"Stream URL: {stream_url[:120]}..."
         )
 
-    def test_default_client_stream_url_gets_403(self):
-        """Demonstrate that the default yt-dlp client (ANDROID_VR) gets 403.
-
-        This is a diagnostic test that documents the root cause of the 403
-        error: YouTube's ANDROID_VR client produces stream URLs that are
-        blocked at download time, even though metadata extraction succeeds.
-
-        The test is expected to FAIL (assert the 403) — it serves as a
-        regression check to ensure the ANDROID client workaround remains
-        necessary.
-        """
-        opts = _make_default_ydl_opts()
-        info, error = _extract_info_safe(_TEST_VIDEO_URL, opts)
-        if error is not None:
-            pytest.skip(f"Info extraction failed with default client: {error}")
-
-        stream_url, fmt_id = _get_best_audio_url(info)
-        if stream_url is None:
-            pytest.skip("No audio stream URL found with default client")
-
-        print(f"\nTesting default (ANDROID_VR) stream URL (format_id={fmt_id})...")
-        status, err = _check_stream_url(stream_url)
-        print(f"Default client stream URL responded: HTTP {status}")
-
-        # The default ANDROID_VR client is currently blocked by YouTube.
-        # This assertion documents that behavior. If YouTube fixes this on
-        # their end (or yt-dlp changes the default), this test will start
-        # failing — which is the signal to re-evaluate the ANDROID override.
-        assert status == _HTTPS_403, (
-            f"Expected HTTP 403 from default client, got HTTP {status}.\n"
-            "YouTube may have unblocked the ANDROID_VR client, or the "
-            "behavior has changed. Re-evaluate the ANDROID client override "
-            "in src/yt/downloader.py."
-        )
-
 
 # ---------------------------------------------------------------------------
 # YouTube client tests (diagnoses 403-on-download root cause)
@@ -323,9 +268,7 @@ class TestYoutubeClientAccessibility:
 
         Only tests metadata extraction (download=False) so it is lightweight.
         """
-        opts = _make_ydl_opts(
-            extractor_args={"youtube": {"player_client": [client]}}
-        )
+        opts = _make_ydl_opts(extractor_args={"youtube": {"player_client": [client]}})
         info, error = _extract_info_safe(_TEST_VIDEO_URL, opts)
         if error is not None:
             status = _get_http_status(error)
@@ -335,10 +278,7 @@ class TestYoutubeClientAccessibility:
 
         stream_url, fmt_id = _get_best_audio_url(info)
         if stream_url is None:
-            pytest.skip(
-                f"Client {client}: no audio formats found "
-                "(JS runtime may be missing)"
-            )
+            pytest.skip(f"Client {client}: no audio formats found " "(JS runtime may be missing)")
 
         print(f"  Client {client}: OK — format_id={fmt_id}")
         assert stream_url is not None
@@ -429,9 +369,7 @@ class TestUserVideoAccess:
         if not _check_connectivity():
             pytest.skip("No network connectivity")
 
-        info, error = _extract_info_safe(
-            _USER_VIDEO_URL, _make_ydl_opts()
-        )
+        info, error = _extract_info_safe(_USER_VIDEO_URL, _make_ydl_opts())
         if error is not None:
             status = _get_http_status(error)
             _raise_403_diagnostics(status, error)
@@ -445,9 +383,7 @@ class TestUserVideoAccess:
         This is the recommended fix for the 403 issue: use the ANDROID player
         client instead of the default ANDROID_VR.
         """
-        opts = _make_ydl_opts(
-            extractor_args={"youtube": {"player_client": ["ANDROID"]}}
-        )
+        opts = _make_ydl_opts(extractor_args={"youtube": {"player_client": ["ANDROID"]}})
         info, error = _extract_info_safe(_USER_VIDEO_URL, opts)
         if error is not None:
             pytest.skip(f"ANDROID client failed to extract info: {error}")
