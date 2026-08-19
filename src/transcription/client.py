@@ -181,6 +181,52 @@ def transcribe(audio_path: Path) -> str:
 
 
 @retry(attempts=3)
+def transcribe_split(
+    audio_path: Path, chunk_duration: int = 590
+) -> str:
+    """Transcribe *audio_path*, splitting into chunks if too long.
+
+    If the audio exceeds *chunk_duration* seconds, it is split into
+    consecutive parts, each transcribed separately, and the transcripts
+    are concatenated in order. This works around OpenRouter's ~10-minute
+    input limit for long audio files.
+
+    Args:
+        audio_path: Path to the audio file to transcribe.
+        chunk_duration: Maximum seconds per chunk (default 590, just under
+            10 minutes).
+
+    Returns:
+        The combined transcript string.
+    """
+    from ..audio.splitter import split_audio, cleanup_chunks
+
+    chunks = split_audio(audio_path, chunk_duration=chunk_duration)
+
+    logger.info(
+        f"Transcribing {len(chunks)} chunk(s) from {audio_path.name}"
+    )
+
+    try:
+        if len(chunks) == 1 and chunks[0].resolve() == audio_path.resolve():
+            # No splitting occurred — transcribe the original file directly.
+            return transcribe(audio_path)
+
+        parts = []
+        for i, chunk_path in enumerate(chunks, start=1):
+            logger.info(f"Transcribing chunk {i}/{len(chunks)}: {chunk_path.name}")
+            text = transcribe(chunk_path)
+            if text:
+                parts.append(f"--- Part {i} ---\n{text}")
+
+        combined = "\n".join(parts)
+        return combined.strip()
+    finally:
+        if len(chunks) > 1:
+            cleanup_chunks(chunks)
+
+
+@retry(attempts=3)
 def summarise(transcript: str) -> str:
     """Summarise *transcript* using OpenRouter's chat endpoint.
 

@@ -19,7 +19,7 @@ from pathlib import Path
 from rich.console import Console
 
 from .yt.downloader import download_audio
-from .transcription.client import transcribe
+from .transcription.client import transcribe, transcribe_split
 from .summarisation.summariser import summarise_and_save
 from .utils.logging import logger
 
@@ -95,11 +95,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Re-download audio even if file already exists",
     )
+    parser.add_argument(
+        "--split",
+        action="store_true",
+        help=(
+            "Split audio into <10-minute chunks before transcribing. "
+            "Useful for long videos that exceed the transcription API limit."
+        ),
+    )
     return parser.parse_args()
 
 
 def process_single_url(
-    url: str, out_dir: Path, no_summary: bool, force: bool = False
+    url: str,
+    out_dir: Path,
+    no_summary: bool,
+    force: bool = False,
+    split: bool = False,
 ) -> bool:
     """Process a single YouTube URL: download, transcribe, and optionally summarize.
 
@@ -108,6 +120,7 @@ def process_single_url(
         out_dir: Output directory for files
         no_summary: If True, skip summary generation
         force: If True, re-download audio even if file exists
+        split: If True, split audio into <10-min chunks before transcribing
 
     Returns:
         True on success, False on error
@@ -118,7 +131,10 @@ def process_single_url(
         console.print(f"[green]Audio ready at:[/] {audio_path}")
 
         console.print("[bold cyan]Transcribing audio…[/]")
-        transcript = transcribe(audio_path)
+        if split:
+            transcript = transcribe_split(audio_path)
+        else:
+            transcript = transcribe(audio_path)
         base_name = Path(audio_path).stem
         _save_transcript(transcript, out_dir, base_name)
 
@@ -149,7 +165,9 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.url:
-        if not process_single_url(args.url, out_dir, args.no_summary, args.force):
+        if not process_single_url(
+            args.url, out_dir, args.no_summary, args.force, args.split
+        ):
             return 1
         return 0
 
@@ -164,7 +182,9 @@ def main() -> int:
         console.print(f"[bold cyan]Processing {len(urls)} video(s)…[/]")
         successes = 0
         for url in urls:
-            if process_single_url(url, out_dir, args.no_summary, args.force):
+            if process_single_url(
+                url, out_dir, args.no_summary, args.force, args.split
+            ):
                 successes += 1
             else:
                 console.print(f"[yellow]Skipping to next video…[/]")

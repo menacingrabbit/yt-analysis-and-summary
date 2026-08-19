@@ -6,6 +6,7 @@ A small Python CLI that downloads a YouTube video's audio, transcribes it with O
 - **Audio download** using `yt-dlp` with progress displayed via `tqdm`
 - **FFmpeg conversion** to MP3 with a conversion progress indicator
 - **Transcription** via OpenRouter's speech-to-text model
+- **Audio splitting** (`--split`) — automatically splits long videos into <10-minute chunks before transcription to work around the OpenRouter API's input-duration limit
 - **Summarisation** using the same model with a bullet-point prompt
 - **Batch processing** – process multiple videos from a text file
 - **Rich console logging** for clear, colour-coded messages
@@ -47,6 +48,10 @@ python -m src.cli --url "..." --out-dir ./data
 # Force re-download even if audio file exists
 python -m src.cli --url "..." --force
 
+# Split long videos into <10-minute chunks before transcribing
+# (useful for videos longer than the OpenRouter API limit)
+python -m src.cli --url "..." --split
+
 # Batch processing – process multiple videos from a file
 python -m src.cli --batch-file urls.txt --out-dir ./data
 ```
@@ -65,6 +70,16 @@ https://www.youtube.com/watch?v=video3
 The CLI will process each video in sequence, logging errors without stopping the batch.
 
 The CLI will display `tqdm` bars for the download and conversion steps and log the transcription and summarisation stages with `rich`.
+
+### Audio splitting (`--split`)
+
+Long videos (over ~10 minutes) can exceed OpenRouter's audio transcription input limit and fail. The `--split` flag splits the downloaded audio into consecutive <10-minute chunks (590 seconds each), transcribes each chunk separately, and automatically concatenates the transcripts in order before summarisation. The combined transcript is saved just like a normal run.
+
+```bash
+python -m src.cli --url "...long-video..." --split
+```
+
+Chunk files are temporary and cleaned up automatically after transcription.
 
 ## Development
 ```bash
