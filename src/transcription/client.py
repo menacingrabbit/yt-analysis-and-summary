@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 
 from .. import config
-from ..audio.splitter import DEFAULT_CHUNK_DURATION, cleanup_chunks, split_audio
+from ..audio.splitter import cleanup_chunks, split_audio
 from ..config import api_timeout, get_api_key
 from ..utils.logging import logger
 from ..utils.retry import RetryableError, retry
@@ -196,13 +196,15 @@ def transcribe_split(audio_path: Path, chunk_duration: int | None = None) -> str
 
     Args:
         audio_path: Path to the audio file to transcribe.
-        chunk_duration: Maximum seconds per chunk (defaults to
+        chunk_duration: Maximum seconds per chunk (defaults to the
+            ``OPENROUTER_CHUNK_SECONDS`` env var, else
             ``audio.splitter.DEFAULT_CHUNK_DURATION``).
 
     Returns:
         The combined transcript string.
     """
-    chunk_duration = chunk_duration or DEFAULT_CHUNK_DURATION
+    if chunk_duration is None:
+        chunk_duration = config.chunk_duration()
     chunks = split_audio(audio_path, chunk_duration=chunk_duration)
 
     logger.info(f"Transcribing {len(chunks)} chunk(s) from {audio_path.name}")

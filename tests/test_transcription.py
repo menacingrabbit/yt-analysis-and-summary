@@ -2,7 +2,6 @@
 
 import pytest
 
-from src.audio.splitter import DEFAULT_CHUNK_DURATION
 from src.transcription.client import (
     RETRYABLE_STATUSES,
     TransientTranscriptionError,
@@ -55,17 +54,15 @@ class TestTranscribeSplit:
         assert "Some text" in result
         assert "--- Part 2 ---" not in result
 
-    def test_default_chunk_duration(self, audio_file, transcription_ctx):
-        """The default chunk duration matches the splitter's constant."""
+    def test_default_chunk_duration(self, audio_file, transcription_ctx, monkeypatch):
+        """When no duration is given, the configured env value is used."""
         audio = audio_file("video.mp3")
         transcription_ctx.split_audio.return_value = [audio]
+        monkeypatch.setenv("OPENROUTER_CHUNK_SECONDS", "42")
 
         transcribe_split(audio)
 
-        assert (
-            transcription_ctx.split_audio.call_args.kwargs["chunk_duration"]
-            == DEFAULT_CHUNK_DURATION
-        )
+        assert transcription_ctx.split_audio.call_args.kwargs["chunk_duration"] == 42
 
     def test_cleanup_called_after_split(self, audio_file, chunk_files, transcription_ctx):
         """cleanup_chunks is invoked with the produced chunks when splitting."""
