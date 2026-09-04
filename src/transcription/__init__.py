@@ -1,4 +1,1 @@
-"""OpenRouter transcription client."""
-from .client import transcribe, summarise
-
-__all__ = ["transcribe", "summarise"]
+"""OpenRouter transcription and summarisation client."""

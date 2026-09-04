@@ -1,80 +1,111 @@
-"""OpenRouter API client for transcription and summarisation.
+"""OpenRouter HTTP client for transcription and summarisation.
 
-Provides two high‑level functions:
+Provides three high-level functions:
 - ``transcribe`` – send an audio file and receive a transcript string.
+- ``transcribe_split`` – split a long audio file and transcribe each chunk.
 - ``summarise`` – send a transcript and receive a concise summary.
 
-Both functions are wrapped with the ``retry`` decorator to handle transient
-network issues.
+Only the leaf network calls are retried, and only for transient failures;
+``transcribe_split`` itself is never retried so a late failure does not
+re-split and re-transcribe already-finished chunks.
 """
 
-import os
 import base64
 import re
 from pathlib import Path
-from typing import Any, Dict, NoReturn
 
 import httpx
 
-from ..config import get_api_key
+from .. import config
+from ..audio.splitter import cleanup_chunks, split_audio
+from ..config import api_timeout, get_api_key
 from ..utils.logging import logger
-from ..utils.retry import retry
+from ..utils.retry import RetryableError, retry
 
 
 class TranscriptionError(RuntimeError):
     """Raised when audio transcription fails due to API or network issues."""
 
-    pass
-
 
 class SummarisationError(RuntimeError):
     """Raised when summarisation fails due to API or network issues."""
 
-    pass
 
+class TransientTranscriptionError(TranscriptionError, RetryableError):
+    """Transient transcription failure that is safe to retry."""
+
+
+class TransientSummarisationError(SummarisationError, RetryableError):
+    """Transient summarisation failure that is safe to retry."""
+
+
+# HTTP statuses worth retrying after a short back-off; everything else is fatal.
+RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
 
 # OpenRouter endpoint for audio transcriptions (expects JSON with base64 audio).
 _AUDIO_API_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 # Chat endpoint for summarisation.
 _CHAT_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Bullet-point summary prompt, with the transcript substituted in.
+_SUMMARY_PROMPT = (
+    "Summarise the following transcript in bullet points, focusing on the "
+    "main ideas, arguments, and conclusions. Write detailed but concise "
+    "summaries. Finally, write 1 sentence summarising the key takeaway. "
+    "Use concise language.\n\n"
+    "```\n{transcript}\n```"
+)
 
-def _get_headers() -> dict:
+
+def _get_headers() -> dict[str, str]:
     """Get headers with API key, evaluated lazily."""
     return {"Authorization": f"Bearer {get_api_key()}"}
 
 
-def _post_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """POST JSON payload to the chat endpoint and return the parsed JSON."""
-    response = httpx.post(
-        _CHAT_API_URL,
-        headers={**_get_headers(), "Content-Type": "application/json"},
-        json=payload,
-        timeout=60.0,
-    )
+def _post(
+    url: str,
+    payload: dict,
+    permanent: type,
+    transient: type,
+) -> dict:
+    """POST a JSON *payload* to an OpenRouter endpoint and return the JSON body.
+
+    Transport-level failures raise ``transient`` (safe to retry); HTTP errors
+    are converted to ``permanent`` or ``transient`` based on the status code.
+    """
+    try:
+        response = httpx.post(
+            url,
+            headers={**_get_headers(), "Content-Type": "application/json"},
+            json=payload,
+            timeout=api_timeout(),
+        )
+    except httpx.TransportError as exc:
+        raise transient(f"Network error contacting OpenRouter: {exc}") from exc
+
     try:
         response.raise_for_status()
-        return response.json()
     except httpx.HTTPStatusError as exc:
-        _raise_with_details(exc, SummarisationError)
+        _raise_with_details(exc, permanent, transient)
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise permanent(f"OpenRouter returned a non-JSON response: {exc}") from exc
 
 
-def _raise_with_details(exc: httpx.HTTPStatusError, error_cls: type) -> NoReturn:
-    """Raise a custom error with more user-friendly details from an HTTPStatusError.
+def _raise_with_details(exc: httpx.HTTPStatusError, permanent: type, transient: type) -> None:
+    """Raise a user-friendly error from an ``httpx.HTTPStatusError``.
 
-    Follows OpenRouter's error format: {"error": {"code": number, "message": string, ...}}
-    See: https://openrouter.ai/docs/api/reference/errors-and-debugging
+    Follows OpenRouter's error format: ``{"error": {"code", "message", ...}}``
+    See: https://openrouter.ai/docs/errors-and-debugging
     """
     response = exc.response
     status = response.status_code
-
-    # Parse OpenRouter error response format (try JSON first)
-    error_msg = ""
-    metadata = None
     content_type = response.headers.get("content-type", "")
     response_text = response.text
 
-    # Check if response is HTML (Cloudflare error pages often have wrong content-type)
+    # Cloudflare error pages come back as HTML with a short title.
     is_html = (
         "text/html" in content_type
         or response_text.strip().startswith("<!DOCTYPE html>")
@@ -82,26 +113,23 @@ def _raise_with_details(exc: httpx.HTTPStatusError, error_cls: type) -> NoReturn
     )
 
     if is_html:
-        # Extract title from Cloudflare error page for cleaner message
         title_match = re.search(r"<title>([^<]+)</title>", response_text)
-        if title_match:
-            error_msg = title_match.group(1)
-        else:
-            error_msg = response.reason_phrase or f"HTTP {status} error"
+        error_msg = (
+            title_match.group(1)
+            if title_match
+            else (response.reason_phrase or f"HTTP {status} error")
+        )
     else:
         try:
-            error_data = response.json()
-            error_obj = error_data.get("error", {})
-            error_msg = error_obj.get("message", "")
-            metadata = error_obj.get("metadata")
-        except Exception:
+            error_obj = response.json().get("error", {})
+            error_msg = error_obj.get("message", "") or response_text
+        except ValueError:
             error_msg = response_text or ""
 
-    # Ensure we have a meaningful error message
     if not error_msg:
         error_msg = response.reason_phrase or f"HTTP {status} error"
 
-    # Friendly messages based on status code (following OpenRouter docs)
+    # Friendly hints for common statuses (following OpenRouter docs).
     status_hints = {
         400: "Invalid request - check your parameters",
         401: "Authentication failed - check your OPENROUTER_API_KEY",
@@ -115,28 +143,19 @@ def _raise_with_details(exc: httpx.HTTPStatusError, error_cls: type) -> NoReturn
         504: "Gateway timeout - provider took too long to respond",
     }
     hint = status_hints.get(status)
-    if hint:
-        full_msg = f"{error_msg} ({hint})"
-    else:
-        full_msg = f"{error_msg} (HTTP {status})"
+    full_msg = f"{error_msg} ({hint})" if hint else f"{error_msg} (HTTP {status})"
 
-    # Log metadata for debugging if present (e.g., mid-stream streaming errors)
-    if metadata:
-        logger.debug(f"API error metadata: {metadata}")
-
+    error_cls = transient if status in RETRYABLE_STATUSES else permanent
     raise error_cls(full_msg) from exc
 
 
-def _post_audio_json(audio_path: Path, model: str) -> Dict[str, Any]:
-    """POST JSON payload with base64‑encoded audio to the transcription endpoint.
+def _post_audio_json(audio_path: Path, model: str) -> dict:
+    """Build a base64-encoded audio payload and POST it to the transcription endpoint.
 
-    The payload follows the OpenRouter example:
+    Follows the OpenRouter example:
     {
         "model": "mistralai/voxtral-mini-transcribe",
-        "input_audio": {
-            "data": "<base64‑encoded‑audio>",
-            "format": "wav"
-        }
+        "input_audio": {"data": "<base64-encoded-audio>", "format": "wav"}
     }
     """
     audio_bytes = audio_path.read_bytes()
@@ -144,46 +163,30 @@ def _post_audio_json(audio_path: Path, model: str) -> Dict[str, Any]:
     # Determine format from file extension; default to "wav" if unknown.
     fmt = audio_path.suffix.lstrip(".").lower() or "wav"
 
-    payload = {
-        "model": model,
-        "input_audio": {"data": audio_b64, "format": fmt},
-    }
-
-    response = httpx.post(
-        _AUDIO_API_URL,
-        headers={**_get_headers(), "Content-Type": "application/json"},
-        json=payload,
-        timeout=60.0,
-    )
-    try:
-        response.raise_for_status()
-        return response.json()
-    except httpx.HTTPStatusError as exc:
-        _raise_with_details(exc, TranscriptionError)
+    payload = {"model": model, "input_audio": {"data": audio_b64, "format": fmt}}
+    return _post(_AUDIO_API_URL, payload, TranscriptionError, TransientTranscriptionError)
 
 
-@retry(attempts=3)
+def _post_chat(payload: dict) -> dict:
+    """POST a JSON *payload* to the chat endpoint and return the parsed JSON."""
+    return _post(_CHAT_API_URL, payload, SummarisationError, TransientSummarisationError)
+
+
+@retry()
 def transcribe(audio_path: Path) -> str:
     """Transcribe *audio_path* using OpenRouter's audio transcription endpoint.
 
-    The function reads the file, encodes it as base64, and sends a JSON payload
-    matching the official example. The model defaults to the value of the
-    ``OPENROUTER_TRANSCRIBE_MODEL`` environment variable.
+    The model defaults to the ``OPENROUTER_TRANSCRIBE_MODEL`` environment
+    variable, falling back to Voxtral Mini (see :func:`src.config.transcribe_model`).
     """
-    # model backup #1: mistralai/voxtral-mini-transcribe
-    model = os.getenv(
-        "OPENROUTER_TRANSCRIBE_MODEL", "mistralai/voxtral-mini-transcribe"
-    )
+    model = config.transcribe_model()
     logger.info(f"Transcribing audio file {audio_path} with model {model}")
     data = _post_audio_json(audio_path, model)
     # The response follows OpenAI's Whisper schema: {"text": "..."}
     return data.get("text", "").strip()
 
 
-@retry(attempts=3)
-def transcribe_split(
-    audio_path: Path, chunk_duration: int = 590
-) -> str:
+def transcribe_split(audio_path: Path, chunk_duration: int | None = None) -> str:
     """Transcribe *audio_path*, splitting into chunks if too long.
 
     If the audio exceeds *chunk_duration* seconds, it is split into
@@ -193,19 +196,18 @@ def transcribe_split(
 
     Args:
         audio_path: Path to the audio file to transcribe.
-        chunk_duration: Maximum seconds per chunk (default 590, just under
-            10 minutes).
+        chunk_duration: Maximum seconds per chunk (defaults to the
+            ``OPENROUTER_CHUNK_SECONDS`` env var, else
+            ``audio.splitter.DEFAULT_CHUNK_DURATION``).
 
     Returns:
         The combined transcript string.
     """
-    from ..audio.splitter import split_audio, cleanup_chunks
-
+    if chunk_duration is None:
+        chunk_duration = config.chunk_duration()
     chunks = split_audio(audio_path, chunk_duration=chunk_duration)
 
-    logger.info(
-        f"Transcribing {len(chunks)} chunk(s) from {audio_path.name}"
-    )
+    logger.info(f"Transcribing {len(chunks)} chunk(s) from {audio_path.name}")
 
     try:
         if len(chunks) == 1 and chunks[0].resolve() == audio_path.resolve():
@@ -219,30 +221,26 @@ def transcribe_split(
             if text:
                 parts.append(f"--- Part {i} ---\n{text}")
 
-        combined = "\n".join(parts)
-        return combined.strip()
+        return "\n".join(parts).strip()
     finally:
         if len(chunks) > 1:
             cleanup_chunks(chunks)
 
 
-@retry(attempts=3)
+@retry()
 def summarise(transcript: str) -> str:
     """Summarise *transcript* using OpenRouter's chat endpoint.
 
-    Sends a concise prompt that asks for a bullet‑point summary.
+    Sends a concise prompt that asks for a bullet-point summary.
     """
     logger.info(f"Summarising transcript (length={len(transcript)} chars)")
-    prompt = (
-        "Summarise the following transcript in bullet points, focusing on the main ideas, arguments, and conclusions. Write detailed but concise summaries. Finally, write 1 sentence summarising the key takeaway. Use concise language.\n\n"
-        "```\n"
-        f"{transcript}\n"
-        "```"
-    )
     payload = {
-        "model": os.getenv("OPENROUTER_SUMMARISE_MODEL", "anthropic/claude-3-5-sonnet"),
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1024,
+        "model": config.summarise_model(),
+        "messages": [{"role": "user", "content": _SUMMARY_PROMPT.format(transcript=transcript)}],
+        "max_tokens": config.max_tokens(),
     }
     data = _post_chat(payload)
-    return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    return choices[0].get("message", {}).get("content", "").strip()

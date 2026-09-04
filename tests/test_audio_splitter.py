@@ -1,11 +1,9 @@
 """Tests for src.audio.splitter module."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-from src.audio.splitter import split_audio, cleanup_chunks, _get_audio_duration
+from src.audio.splitter import _get_audio_duration, cleanup_chunks, split_audio
 
 
 class TestSplitAudio:
@@ -16,9 +14,7 @@ class TestSplitAudio:
         audio = tmp_path / "short.mp3"
         audio.write_bytes(b"")
 
-        with patch(
-            "src.audio.splitter._get_audio_duration", return_value=30.0
-        ):
+        with patch("src.audio.splitter._get_audio_duration", return_value=30.0):
             chunks = split_audio(audio, chunk_duration=590)
 
         assert len(chunks) == 1
@@ -29,119 +25,88 @@ class TestSplitAudio:
         audio = tmp_path / "long.mp3"
         audio.write_bytes(b"")
 
-        with patch(
-            "src.audio.splitter._get_audio_duration", return_value=1500.0
-        ), patch("src.audio.splitter.shutil.which") as mock_which, patch(
-            "src.audio.splitter.subprocess.run"
-        ) as mock_run, patch(
-            "src.audio.splitter.tempfile.mkdtemp", return_value=str(tmp_path / "tmp")
+        with (
+            patch("src.audio.splitter._get_audio_duration", return_value=1500.0),
+            patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("src.audio.splitter.subprocess.run") as mock_run,
+            patch("src.audio.splitter.tempfile.mkdtemp", return_value=str(tmp_path / "tmp")),
         ):
-            mock_which.return_value = "/usr/bin/ffmpeg"
-            # Simulate ffmpeg creating 3 chunk files
             tmp_dir = tmp_path / "tmp"
             tmp_dir.mkdir(exist_ok=True)
-            (tmp_dir / "part_000.mp3").write_bytes(b"")
-            (tmp_dir / "part_001.mp3").write_bytes(b"")
-            (tmp_dir / "part_002.mp3").write_bytes(b"")
+            for i in range(3):
+                (tmp_dir / f"part_{i:03d}.mp3").write_bytes(b"")
 
             chunks = split_audio(audio, chunk_duration=590)
 
-        assert len(chunks) == 3
-        assert chunks[0].name == "part_000.mp3"
-        assert chunks[1].name == "part_001.mp3"
-        assert chunks[2].name == "part_002.mp3"
-        # Verify ffmpeg was called with the right arguments
+        assert [c.name for c in chunks] == [
+            "part_000.mp3",
+            "part_001.mp3",
+            "part_002.mp3",
+        ]
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
-        assert "-f" in cmd
-        assert "segment" in cmd
-        assert str(590) in cmd
+        assert "-f" in cmd and "segment" in cmd and "590" in cmd
 
     def test_no_ffmpeg_fallback(self, tmp_path):
         """If ffmpeg is unavailable, return the original file unsplit."""
         audio = tmp_path / "video.mp3"
         audio.write_bytes(b"")
 
-        with patch(
-            "src.audio.splitter._get_audio_duration", return_value=1500.0
-        ), patch("src.audio.splitter.shutil.which", return_value=None):
-            chunks = split_audio(audio, chunk_duration=590)
-
-        assert len(chunks) == 1
-        assert chunks[0] == audio
-
-    def test_ffmpeg_failure_fallback(self, tmp_path):
-        """If ffmpeg fails, return the original file unsplit."""
-        audio = tmp_path / "video.mp3"
-        audio.write_bytes(b"")
-
-        with patch(
-            "src.audio.splitter._get_audio_duration", return_value=1500.0
-        ), patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
-            "src.audio.splitter.subprocess.run",
-            side_effect=__import__("subprocess").CalledProcessError(1, "ffmpeg"),
-        ), patch(
-            "src.audio.splitter.tempfile.mkdtemp", return_value=str(tmp_path / "tmp")
+        with (
+            patch("src.audio.splitter._get_audio_duration", return_value=1500.0),
+            patch("src.audio.splitter.shutil.which", return_value=None),
         ):
             chunks = split_audio(audio, chunk_duration=590)
 
-        assert len(chunks) == 1
-        assert chunks[0] == audio
+        assert chunks == [audio]
+
+    def test_ffmpeg_failure_fallback(self, tmp_path):
+        """If ffmpeg fails, return the original file unsplit."""
+        import subprocess
+
+        audio = tmp_path / "video.mp3"
+        audio.write_bytes(b"")
+
+        with (
+            patch("src.audio.splitter._get_audio_duration", return_value=1500.0),
+            patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch(
+                "src.audio.splitter.subprocess.run",
+                side_effect=subprocess.CalledProcessError(1, "ffmpeg"),
+            ),
+            patch("src.audio.splitter.tempfile.mkdtemp", return_value=str(tmp_path / "tmp")),
+        ):
+            chunks = split_audio(audio, chunk_duration=590)
+
+        assert chunks == [audio]
 
     def test_no_duration_info_still_tries_split(self, tmp_path):
         """If duration can't be determined, still attempt the split."""
         audio = tmp_path / "unknown.mp3"
         audio.write_bytes(b"")
 
-        with patch(
-            "src.audio.splitter._get_audio_duration", return_value=None
-        ), patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
-            "src.audio.splitter.subprocess.run"
-        ) as mock_run, patch(
-            "src.audio.splitter.tempfile.mkdtemp", return_value=str(tmp_path / "tmp")
+        with (
+            patch("src.audio.splitter._get_audio_duration", return_value=None),
+            patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("src.audio.splitter.subprocess.run") as mock_run,
+            patch("src.audio.splitter.tempfile.mkdtemp", return_value=str(tmp_path / "tmp")),
         ):
-            tmp_dir = tmp_path / "tmp"
-            tmp_dir.mkdir(exist_ok=True)
-            (tmp_dir / "part_000.mp3").write_bytes(b"")
+            (tmp_path / "tmp").mkdir(exist_ok=True)
+            (tmp_path / "tmp" / "part_000.mp3").write_bytes(b"")
             mock_run.return_value = MagicMock(returncode=0)
 
             chunks = split_audio(audio, chunk_duration=590)
 
-        # Should have attempted to split via ffmpeg
+        assert len(chunks) == 1
         mock_run.assert_called_once()
-
-    def test_chunks_are_ordered(self, tmp_path):
-        """Returned chunk paths should be sorted (part_000, part_001, ...)."""
-        audio = tmp_path / "video.mp3"
-        audio.write_bytes(b"")
-
-        with patch(
-            "src.audio.splitter._get_audio_duration", return_value=1500.0
-        ), patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
-            "src.audio.splitter.subprocess.run"
-        ), patch(
-            "src.audio.splitter.tempfile.mkdtemp", return_value=str(tmp_path / "tmp")
-        ):
-            tmp_dir = tmp_path / "tmp"
-            tmp_dir.mkdir(exist_ok=True)
-            (tmp_dir / "part_002.mp3").write_bytes(b"")
-            (tmp_dir / "part_000.mp3").write_bytes(b"")
-            (tmp_dir / "part_001.mp3").write_bytes(b"")
-
-            chunks = split_audio(audio, chunk_duration=590)
-
-        assert len(chunks) == 3
-        assert chunks[0].name == "part_000.mp3"
-        assert chunks[1].name == "part_001.mp3"
-        assert chunks[2].name == "part_002.mp3"
 
 
 class TestCleanupChunks:
     """Tests for the cleanup_chunks function."""
 
-    def test_removes_files_and_dir(self, tmp_path):
-        """cleanup_chunks should remove chunk files and the parent temp dir."""
-        chunk_dir = tmp_path / "tmp"
+    def test_removes_chunks_and_temp_dir(self, tmp_path):
+        """cleanup_chunks removes splitter-owned chunk files and the temp dir."""
+        chunk_dir = tmp_path / "yt-split-abc"
         chunk_dir.mkdir()
         f1 = chunk_dir / "part_000.mp3"
         f2 = chunk_dir / "part_001.mp3"
@@ -157,11 +122,10 @@ class TestCleanupChunks:
     def test_empty_list_is_noop(self):
         """cleanup_chunks with an empty list should not raise."""
         cleanup_chunks([])
-        assert True  # no exception = pass
 
     def test_missing_file_silent(self, tmp_path):
         """cleanup_chunks should not raise if a file is already gone."""
-        chunk_dir = tmp_path / "tmp"
+        chunk_dir = tmp_path / "yt-split-abc"
         chunk_dir.mkdir()
         existing = chunk_dir / "part_000.mp3"
         existing.write_bytes(b"")
@@ -171,6 +135,16 @@ class TestCleanupChunks:
 
         assert not existing.exists()
         assert not chunk_dir.exists()
+
+    def test_unsplit_original_is_never_removed(self, tmp_path):
+        """A user's original audio file must be left untouched."""
+        audio = tmp_path / "my-video.mp3"
+        audio.write_bytes(b"data")
+
+        cleanup_chunks([audio])
+
+        assert audio.exists()
+        assert audio.read_bytes() == b"data"
 
 
 class TestGetAudioDuration:
@@ -186,12 +160,11 @@ class TestGetAudioDuration:
         audio = tmp_path / "test.mp3"
         audio.write_bytes(b"")
 
-        with patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffprobe"), patch(
-            "src.audio.splitter.subprocess.run"
-        ) as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="42.5\n", stderr=""
-            )
+        with (
+            patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch("src.audio.splitter.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="42.5\n", stderr="")
             result = _get_audio_duration(audio)
 
         assert result == 42.5
@@ -203,9 +176,12 @@ class TestGetAudioDuration:
         audio = tmp_path / "test.mp3"
         audio.write_bytes(b"")
 
-        with patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffprobe"), patch(
-            "src.audio.splitter.subprocess.run",
-            side_effect=subprocess.SubprocessError("ffprobe failed"),
+        with (
+            patch("src.audio.splitter.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch(
+                "src.audio.splitter.subprocess.run",
+                side_effect=subprocess.SubprocessError("ffprobe failed"),
+            ),
         ):
             result = _get_audio_duration(audio)
 

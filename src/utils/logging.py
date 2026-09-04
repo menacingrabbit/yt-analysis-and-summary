@@ -1,25 +1,20 @@
-"""Simple logging utilities using rich for pretty console output.
+"""Logging setup using stdlib ``logging`` with a rich console handler.
 
-Provides a module‑level ``logger`` with ``info``, ``warning`` and ``error``
-methods that delegate to ``rich.console.Console``.
+Provides a module-level ``logger`` (a plain ``logging.Logger``) wired to a
+``rich.logging.RichHandler`` so levels, ``logger.exception()`` tracebacks, and
+markup-safe messages all behave as expected. Call :func:`configure` to set the
+verbosity (e.g. from a CLI flag).
 """
 
-from rich.console import Console
+import logging
 
-console = Console()
+from rich.logging import RichHandler
 
-class _RichLogger:
-    def info(self, msg: str, *args, **kwargs) -> None:
-        console.print(f"[green]INFO[/green] {msg}", *args, **kwargs)
+logger = logging.getLogger("yt-analysis-and-summary")
+logger.addHandler(RichHandler(rich_tracebacks=True, keywords=["INFO", "WARN", "ERROR", "DEBUG"]))
+logger.setLevel(logging.INFO)
 
-    def warning(self, msg: str, *args, **kwargs) -> None:
-        console.print(f"[yellow]WARN[/yellow] {msg}", *args, **kwargs)
 
-    def error(self, msg: str, *args, **kwargs) -> None:
-        console.print(f"[red]ERROR[/red] {msg}", *args, **kwargs)
-
-    def debug(self, msg: str, *args, **kwargs) -> None:
-        # Debug can be toggled via an env var if needed; for now always show.
-        console.print(f"[dim]DEBUG[/dim] {msg}", *args, **kwargs)
-
-logger = _RichLogger()
+def configure(level: int = logging.INFO) -> None:
+    """Set the level for this project's logger."""
+    logger.setLevel(level)

@@ -11,63 +11,62 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from yt_dlp import YoutubeDL
 from tqdm import tqdm
+from yt_dlp import YoutubeDL
 
-from .utils import slugify, _clean
 from ..utils.logging import logger
+from .utils import clean_title, slugify
+
+# Base options for every yt-dlp call. The ANDROID player client avoids the
+# HTTP 403 that YouTube returns for stream downloads via the default
+# ANDROID_VR client. See tests/test_youtube_api_access.py.
+_BASE_YDL_OPTS: dict[str, Any] = {
+    "quiet": True,
+    "no_warnings": True,
+    "extractor_args": {"youtube": {"player_client": ["ANDROID"]}},
+}
+
+# Leading YYYYMMDD- date prefix that slugify() prepends to filenames.
+_DATE_PREFIX_RE = re.compile(r"^\d{8}-")
 
 
 class ProgressManager:
-    """Manages tqdm progress bar state for downloads.
+    """Encapsulates tqdm progress bar state for a download."""
 
-    This class encapsulates progress bar state, making it thread-safe for
-    concurrent downloads (unlike storing state on function attributes).
-    """
-
-    def __init__(self):
+    def __init__(self) -> None:
         self._bar: tqdm | None = None
 
     def hook(self, d: dict) -> None:
-        """Hook for yt-dlp to forward progress to tqdm.
-
-        yt-dlp passes dictionaries with a ``status`` key. We handle ``downloading``
-        and update the internal tqdm bar.
-        """
-        if d["status"] == "downloading":
+        """yt-dlp progress callback that forwards progress to tqdm."""
+        if d.get("status") == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes")
             if self._bar is None:
-                self._bar = tqdm(
-                    total=total, unit="B", unit_scale=True, desc="Downloading"
-                )
+                self._bar = tqdm(total=total, unit="B", unit_scale=True, desc="Downloading")
             self._bar.total = total or self._bar.total
-            self._bar.update(downloaded - self._bar.n)
-        elif d["status"] == "finished":
-            if self._bar is not None:
-                self._bar.close()
-                print()
-                logger.info(
-                    "Download finished, now converting (if ffmpeg is available)..."
-                )
+            # Guard: downloaded may be missing on some callbacks.
+            if downloaded is not None:
+                self._bar.update(downloaded - self._bar.n)
+        elif d.get("status") == "finished" and self._bar is not None:
+            self._bar.close()
+            logger.info("Download finished, now converting (if ffmpeg is available)...")
 
 
 def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
-    """Run ffmpeg to convert *input_path* to MP3 *output_path*.
+    """Convert *input_path* to MP3 *output_path* via ffmpeg, copying as fallback.
 
-    If ffmpeg is not installed or execution fails, the function copies the
-    original file to the destination (preserving the original format) and logs a
-    warning.
+    If ffmpeg is unavailable or conversion fails, the original file is copied
+    to *output_path* unchanged rather than failing the pipeline.
     """
     ffmpeg_exe = shutil.which("ffmpeg")
     if not ffmpeg_exe:
         logger.warning(
             "ffmpeg not found – copying original file to destination without conversion."
         )
-        output_path.write_bytes(input_path.read_bytes())
+        shutil.copyfile(input_path, output_path)
         return
 
-    ffmpeg_cmd = [
+    cmd = [
         ffmpeg_exe,
         "-y",  # overwrite output if exists
         "-i",
@@ -79,20 +78,11 @@ def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
     ]
     logger.info("Starting ffmpeg conversion...")
     try:
-        subprocess.run(
-            ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except subprocess.SubprocessError as exc:
-        # Specific exception: conversion failure
-        logger.warning(
-            f"ffmpeg conversion failed ({exc}); copying original file instead."
-        )
-        output_path.write_bytes(input_path.read_bytes())
-        return
-
-
-# Leading YYYYMMDD- date prefix that slugify() prepends to filenames.
-_DATE_PREFIX_RE = re.compile(r"^\d{8}-")
+        # Conversion failed — fall back to copying the original file.
+        logger.warning(f"ffmpeg conversion failed ({exc}); copying original file instead.")
+        shutil.copyfile(input_path, output_path)
 
 
 def _audio_mp3_name(slug: str, video_id: str) -> str:
@@ -143,11 +133,12 @@ def _find_existing_audio(out_dir: Path, video_id: str, title_slug: str) -> Path 
 
 
 def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
-    """Download the best audio from *url* into *out_dir* and return MP3 path.
+    """Download the best audio from *url* into *out_dir* and return the MP3 path.
 
     The function creates ``out_dir`` if it does not exist, generates a safe
     filename using :func:`slugify`, and runs ``ffmpeg`` to convert the downloaded
-    file to MP3 when possible.
+    file to MP3 when possible. Existing files are resumed unless ``force`` is
+    set.
 
     Args:
         url: YouTube video URL to download
@@ -159,47 +150,39 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Extract info once to get the title and generate our slug.
-    # Use the ANDROID player client — YouTube frequently blocks stream
-    # downloads via the default ANDROID_VR client with HTTP 403, while
-    # ANDROID remains accessible. See tests/test_youtube_api_access.py.
-    with YoutubeDL(
-        {"quiet": True, "no_warnings": True, "extractor_args": {"youtube": {"player_client": ["ANDROID"]}}}
-    ) as ydl:
+    # First pass: fetch metadata so we can compute the slug and know the video
+    # id for resume detection — before committing to a download.
+    with YoutubeDL(_BASE_YDL_OPTS) as ydl:
         info = ydl.extract_info(url, download=False)
-        title = info.get("title", "audio")
-        video_id = info.get("id", "")
-        slug = slugify(title)
+    if info is None:
+        raise RuntimeError(f"Could not fetch metadata for {url}")
 
-    # Use our slug as the base filename for yt-dlp
-    temp_template = out_dir / f"{slug}.%(ext)s"
+    title = info.get("title") or "audio"
+    video_id = str(info.get("id") or "")
+    slug = slugify(title)
     mp3_path = out_dir / _audio_mp3_name(slug, video_id)
 
-    # Check if file already exists (handles date prefix variations)
+    # Resume support: skip the download if the audio already exists.
     if not force:
-        # Get title without date prefix for searching
-        title_only = _clean(title)
-        existing = _find_existing_audio(out_dir, video_id, title_only)
+        existing = _find_existing_audio(out_dir, video_id, clean_title(title))
         if existing:
             logger.info(f"Audio already exists at {existing}, skipping download")
             return existing
 
     progress_mgr = ProgressManager()
     ydl_opts: dict[str, Any] = {
+        **_BASE_YDL_OPTS,
         "format": "bestaudio/best",
-        "outtmpl": str(temp_template),
+        "outtmpl": str(out_dir / f"{slug}.%(ext)s"),
         "progress_hooks": [progress_mgr.hook],
-        "quiet": True,
-        "no_warnings": True,
-        # ANDROID client avoids the HTTP 403 that YouTube returns for
-        # ANDROID_VR stream downloads.
-        "extractor_args": {"youtube": {"player_client": ["ANDROID"]}},
     }
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        original_path = Path(ydl.prepare_filename(info))
+    if info is None:
+        raise RuntimeError(f"Could not download {url}")
+    original_path = Path(ydl.prepare_filename(info))
 
-    # Convert to MP3 using ffmpeg (or copy if unavailable/fails)
+    # Convert to MP3 using ffmpeg (or copy if unavailable/fails).
     _run_ffmpeg(original_path, mp3_path)
 
     # Remove the original download if it is different from the final output.

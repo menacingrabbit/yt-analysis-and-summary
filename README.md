@@ -52,9 +52,16 @@ python -m src.cli --url "..." --force
 # (useful for videos longer than the OpenRouter API limit)
 python -m src.cli --url "..." --split
 
+# Adjust log verbosity
+python -m src.cli --url "..." --verbose   # debug output
+python -m src.cli --url "..." --quiet     # warnings and errors only
+
 # Batch processing – process multiple videos from a file
 python -m src.cli --batch-file urls.txt --out-dir ./data
 ```
+
+**Exit codes:** `0` on success. A failed single run, or a batch run where any
+video fails, returns `1` — so the CLI works as a gate in scripts and CI.
 
 ### Batch file format
 
@@ -95,9 +102,12 @@ pytest
 
 ## Environment variables
 - `OPENROUTER_API_KEY` – required for any OpenRouter request
-- Optional model overrides:
-  - `OPENROUTER_TRANSCRIBE_MODEL`
-  - `OPENROUTER_SUMMARISE_MODEL`
+- Optional overrides (copy `.env.example` to `.env`):
+  - `OPENROUTER_TRANSCRIBE_MODEL` – transcription model (default `mistralai/voxtral-mini-transcribe`)
+  - `OPENROUTER_SUMMARISE_MODEL` – summarisation model (default `anthropic/claude-3.5-sonnet`)
+  - `OPENROUTER_TIMEOUT` – request timeout in seconds (default `60.0`)
+  - `OPENROUTER_MAX_TOKENS` – max tokens for summaries (default `1024`)
+  - `OPENROUTER_CHUNK_SECONDS` – max seconds per audio chunk for `--split` (default `590`)
 
 ## License
 MIT License updated.

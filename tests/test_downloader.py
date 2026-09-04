@@ -60,10 +60,7 @@ def test_written_name_is_found_on_resume(tmp_path):
 
 def test_mp3_name_includes_id_when_present_and_falls_back_without():
     assert dl._audio_mp3_name("20260717-clean-title", "") == "20260717-clean-title.mp3"
-    assert (
-        dl._audio_mp3_name("20260717-clean-title", "abc123")
-        == "20260717-clean-title-abc123.mp3"
-    )
+    assert dl._audio_mp3_name("20260717-clean-title", "abc123") == "20260717-clean-title-abc123.mp3"
 
 
 def _make_fake_ydl(info, spy, tmp_path):
