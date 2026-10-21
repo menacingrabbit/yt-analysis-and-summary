@@ -230,11 +230,11 @@ def transcribe_split(
         audio_path: Path to the audio file to transcribe.
         chunk_duration: Maximum seconds per chunk (defaults to the
             ``OPENROUTER_CHUNK_SECONDS`` env var, else
-            ``audio.splitter.DEFAULT_CHUNK_DURATION``).
+            ``defaults.DEFAULT_CHUNK_DURATION``).
         overlap_seconds: Seconds of tail overlap between consecutive chunks so
             boundary-straddling speech is heard in full (defaults to the
             ``OPENROUTER_CHUNK_OVERLAP`` env var, else
-            ``audio.splitter.DEFAULT_CHUNK_OVERLAP``).
+            ``defaults.DEFAULT_CHUNK_OVERLAP``).
 
     Returns:
         The combined transcript string.

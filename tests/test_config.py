@@ -45,7 +45,7 @@ def test_max_tokens_default(monkeypatch):
 
 def test_chunk_duration_default(monkeypatch):
     monkeypatch.delenv("OPENROUTER_CHUNK_SECONDS", raising=False)
-    assert config.chunk_duration() == 590
+    assert config.chunk_duration() == defaults.DEFAULT_CHUNK_DURATION
 
 
 def test_chunk_duration_overridable(monkeypatch):
@@ -54,9 +54,9 @@ def test_chunk_duration_overridable(monkeypatch):
 
 
 def test_chunk_overlap_default(monkeypatch):
-    """The overlap default must match the CLI-documented default of 3."""
+    """The overlap default must match the CLI-documented value in src/defaults.py."""
     monkeypatch.delenv("OPENROUTER_CHUNK_OVERLAP", raising=False)
-    assert config.chunk_overlap() == 3
+    assert config.chunk_overlap() == defaults.DEFAULT_CHUNK_OVERLAP
 
 
 def test_chunk_overlap_overridable(monkeypatch):
