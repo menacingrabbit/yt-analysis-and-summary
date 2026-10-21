@@ -9,6 +9,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .defaults import (
+    DEFAULT_API_TIMEOUT,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_SUMMARISE_MODEL,
+    DEFAULT_TRANSCRIBE_MODEL,
+)
+
 # Load .env if present at the repository root (one directory above src/).
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env")
@@ -45,22 +52,22 @@ def get_api_key() -> str:
 
 def transcribe_model() -> str:
     """Model used for audio transcription (env-overridable)."""
-    return get_env("OPENROUTER_TRANSCRIBE_MODEL") or "mistralai/voxtral-mini-transcribe"
+    return get_env("OPENROUTER_TRANSCRIBE_MODEL") or DEFAULT_TRANSCRIBE_MODEL
 
 
 def summarise_model() -> str:
     """Model used for transcript summarisation (env-overridable)."""
-    return get_env("OPENROUTER_SUMMARISE_MODEL") or "anthropic/claude-3.5-sonnet"
+    return get_env("OPENROUTER_SUMMARISE_MODEL") or DEFAULT_SUMMARISE_MODEL
 
 
 def api_timeout() -> float:
     """Timeout in seconds for OpenRouter requests (env-overridable)."""
-    return float(get_env("OPENROUTER_TIMEOUT") or 60.0)
+    return float(get_env("OPENROUTER_TIMEOUT") or DEFAULT_API_TIMEOUT)
 
 
 def max_tokens() -> int:
     """Maximum tokens for summarisation responses (env-overridable)."""
-    return int(get_env("OPENROUTER_MAX_TOKENS") or 1024)
+    return int(get_env("OPENROUTER_MAX_TOKENS") or DEFAULT_MAX_TOKENS)
 
 
 def chunk_duration() -> int:

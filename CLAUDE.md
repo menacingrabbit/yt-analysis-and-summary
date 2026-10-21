@@ -62,6 +62,7 @@ src/
 ├── __init__.py
 ├── cli.py              # CLI entry point
 ├── config.py           # Environment variable settings (lazy API key validation)
+├── defaults.py         # Default models / timeouts / token limits (single source of truth)
 ├── yt/
 │   ├── __init__.py
 │   ├── downloader.py   # Audio download with ffmpeg conversion
@@ -97,6 +98,7 @@ tests/
 
 - **Lazy API key validation**: `config.py` defers validation until API calls are made, allowing `--help` without a key; `get_api_key()` is the *only* caller of the key env var.
 - **Centralised settings**: `config.py` exposes typed helpers (`transcribe_model()`, `summarise_model()`, `api_timeout()`, `max_tokens()`, `chunk_duration()`) instead of scattered `os.getenv` calls.
+- **Defaults live in `src/defaults.py`**: model names, timeout and token limit are named constants (`DEFAULT_TRANSCRIBE_MODEL`, …) that `config.py` falls back to when the env var is unset. Change defaults there, not inline in `config.py`.
 - **Transient-only retries**: `utils/retry.py` retries only `RetryableError` subclasses; the API client raises transient subclasses for retryable HTTP statuses (429/5xx) and network errors, and permanent ones otherwise.
 - **ProgressManager class**: encapsulates `tqdm` bar state in `src/yt/downloader.py`.
 - **Shared test fixtures**: `tests/conftest.py` provides `audio_file`, `chunk_files`, and `transcription_ctx` (a patched split/cleanup/transcribe helper) to avoid repeating mock boilerplate; network tests are marked `network` and skipped by default.
