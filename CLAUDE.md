@@ -46,7 +46,7 @@ The repository provides a small end-to-end pipeline for extracting, transcribing
 2. **Audio extraction** – `src/yt/downloader.py` uses `yt-dlp` to download the best audio track
 3. **Audio splitting** – `src/audio/splitter.py` splits long audio into <10-minute chunks (`--split`) via ffmpeg
 4. **Transcription** – `src/transcription/client.py` calls OpenRouter's speech-to-text API
-5. **Summarisation** – `src/summarisation/summariser.py` generates bullet-point summaries
+5. **Summarisation** – `src/summarisation/summariser.py` generates summaries, rendered into a fixed template (`title → key points → takeaway`) by `src/summarisation/template.py`
 6. **Utilities** – shared modules in `src/utils/` (logging, retry) and `src/config.py` (env settings)
 
 The overall data flow is:
@@ -74,7 +74,8 @@ src/
 │   └── client.py       # OpenRouter API client (transcribe & summarise)
 ├── summarisation/
 │   ├── __init__.py
-│   └── summariser.py   # Summary generation + save-to-disk wrapper
+│   ├── summariser.py   # Summary generation + save-to-disk wrapper
+│   └── template.py     # Canonical summary normalisation/rendering
 └── utils/
     ├── __init__.py
     ├── logging.py      # stdlib logging with a rich console handler
@@ -100,3 +101,5 @@ tests/
 - **ProgressManager class**: encapsulates `tqdm` bar state in `src/yt/downloader.py`.
 - **Shared test fixtures**: `tests/conftest.py` provides `audio_file`, `chunk_files`, and `transcription_ctx` (a patched split/cleanup/transcribe helper) to avoid repeating mock boilerplate; network tests are marked `network` and skipped by default.
 - **Output naming**: transcripts go to `<stem>_transcript.txt`, summaries to `<stem>_summary.txt` (the only place that builds these names is `_save_transcript`/`_save_summary` in `cli.py` and `summariser.py`).
+- **Canonical summary template**: `summarise()` returns raw model text; `template.render_summary(title, raw)` enforces `# title / ## Key Points / ## Key Takeaway`. The prompt asks for the same layout, but the renderer is the guarantee — keep normalisation deterministic and unit-tested rather than relying on prompt wording.
+- **Title plumbing**: `download_audio()` returns an `AudioDownload(path, title, video_id)`; the real yt-dlp title is passed down for the summary heading. Don't derive titles from the filename slug unless the title is missing (`title_from_stem` is the fallback).

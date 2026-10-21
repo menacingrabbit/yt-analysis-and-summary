@@ -8,6 +8,7 @@ through ``tqdm``.
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,23 @@ _BASE_YDL_OPTS: dict[str, Any] = {
 
 # Leading YYYYMMDD- date prefix that slugify() prepends to filenames.
 _DATE_PREFIX_RE = re.compile(r"^\d{8}-")
+
+
+@dataclass(frozen=True)
+class AudioDownload:
+    """Result of :func:`download_audio`.
+
+    The video title is carried along because the summary template needs it and
+    the filename slug is lossy (lower-cased, accents removed, truncated).
+    """
+
+    path: Path
+    title: str
+    video_id: str
+
+    def __fspath__(self) -> str:
+        """Allow passing the result where a filesystem path is expected."""
+        return str(self.path)
 
 
 class ProgressManager:
@@ -132,8 +150,8 @@ def _find_existing_audio(out_dir: Path, video_id: str, title_slug: str) -> Path 
     return None
 
 
-def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
-    """Download the best audio from *url* into *out_dir* and return the MP3 path.
+def download_audio(url: str, out_dir: Path, force: bool = False) -> AudioDownload:
+    """Download the best audio from *url* into *out_dir*.
 
     The function creates ``out_dir`` if it does not exist, generates a safe
     filename using :func:`slugify`, and runs ``ffmpeg`` to convert the downloaded
@@ -146,7 +164,7 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
         force: If True, re-download even if file exists
 
     Returns:
-        Path to the downloaded MP3 file
+        An :class:`AudioDownload` with the MP3 path and the video's title.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -157,7 +175,8 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
     if info is None:
         raise RuntimeError(f"Could not fetch metadata for {url}")
 
-    title = info.get("title") or "audio"
+    raw_title = str(info.get("title") or "").strip()
+    title = raw_title or "audio"
     video_id = str(info.get("id") or "")
     slug = slugify(title)
     mp3_path = out_dir / _audio_mp3_name(slug, video_id)
@@ -167,7 +186,7 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
         existing = _find_existing_audio(out_dir, video_id, clean_title(title))
         if existing:
             logger.info(f"Audio already exists at {existing}, skipping download")
-            return existing
+            return AudioDownload(existing, raw_title, video_id)
 
     progress_mgr = ProgressManager()
     ydl_opts: dict[str, Any] = {
@@ -180,6 +199,8 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
         info = ydl.extract_info(url, download=True)
     if info is None:
         raise RuntimeError(f"Could not download {url}")
+    # The metadata pass may have lacked the title; recover it here if so.
+    raw_title = raw_title or str(info.get("title") or "").strip()
     original_path = Path(ydl.prepare_filename(info))
 
     # Convert to MP3 using ffmpeg (or copy if unavailable/fails).
@@ -189,4 +210,4 @@ def download_audio(url: str, out_dir: Path, force: bool = False) -> Path:
     if original_path.resolve() != mp3_path.resolve():
         original_path.unlink()
 
-    return mp3_path
+    return AudioDownload(mp3_path, raw_title, video_id)

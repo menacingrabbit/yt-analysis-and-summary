@@ -63,6 +63,31 @@ python -m src.cli --batch-file urls.txt --out-dir ./data
 **Exit codes:** `0` on success. A failed single run, or a batch run where any
 video fails, returns `1` — so the CLI works as a gate in scripts and CI.
 
+### Summary output format
+
+Every summary file follows the same template, regardless of how the model
+responds:
+
+```markdown
+# <video title>
+
+## Key Points
+
+- one idea per bullet
+- …
+
+## Key Takeaway
+
+<one sentence>
+```
+
+The `#` heading is the video's real title (falling back to a readable version of
+the filename when no title is available). Renamed headings, introductory
+sentences and missing takeaway sections from the model are normalised away by
+`src/summarisation/template.py`, so outputs are predictable and easy to diff.
+If a summary is cut off, raise `OPENROUTER_MAX_TOKENS`; a warning is logged when
+the model hits the token limit.
+
 ### Batch file format
 
 Create a text file with one YouTube URL per line. Lines starting with `#` are treated as comments, and empty lines are ignored:

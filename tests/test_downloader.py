@@ -108,7 +108,9 @@ def test_download_audio_resumes_when_file_exists_empty_id(tmp_path, mocker):
 
     result = dl.download_audio("https://youtu.be/abc", tmp_path)
 
-    assert result == existing
+    assert result.path == existing
+    assert result.title == "Clean Title"
+    assert result.video_id == ""
     assert spy["downloaded"] is False  # resume skipped the actual download
 
 
@@ -124,5 +126,24 @@ def test_download_audio_downloads_when_file_absent_empty_id(tmp_path, mocker):
     result = dl.download_audio("https://youtu.be/abc", tmp_path)
 
     expected = tmp_path / dl._audio_mp3_name(dl.slugify("Clean Title"), "")
-    assert result == expected
+    assert result.path == expected
+    assert result.title == "Clean Title"
     assert spy["downloaded"] is True  # no existing file -> real download attempted
+
+
+def test_download_audio_title_available_on_resume_with_video_id(tmp_path, mocker):
+    # Metadata is fetched before the resume check, so the title is known even
+    # when no download happens. Real titles keep their case and accents.
+    info = {"title": "Zerstört KI YouTube?", "id": "dQw4w9WgXcQ"}
+    mocker.patch(
+        "src.yt.downloader.YoutubeDL",
+        return_value=_make_fake_ydl(info, {"downloaded": False}, tmp_path),
+    )
+    existing = tmp_path / dl._audio_mp3_name(dl.slugify("x"), "dQw4w9WgXcQ")
+    existing.write_bytes(b"")
+
+    result = dl.download_audio("https://youtu.be/abc", tmp_path)
+
+    assert result.path == existing
+    assert result.title == "Zerstört KI YouTube?"
+    assert result.video_id == "dQw4w9WgXcQ"
