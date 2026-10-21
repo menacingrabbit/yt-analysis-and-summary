@@ -163,6 +163,44 @@ class TestNormalise:
         _, takeaway = normalise_summary(raw)
         assert takeaway == "Real sentence."
 
+    def test_fully_bold_takeaway_bullet_keeps_its_text(self):
+        """Regression: emphasis markers are stripped, not the whole phrase."""
+        _, takeaway = normalise_summary("## Key Takeaway\n- **The main point.**\n")
+        assert takeaway == "The main point."
+
+    def test_bold_subject_keeps_its_words(self):
+        raw = "## Key Takeaway\n**The policy** changes how creators monetise.\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "The policy changes how creators monetise."
+
+    def test_bold_label_is_removed(self):
+        raw = "## Key Takeaway\n**Key takeaway:** The policy matters.\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "The policy matters."
+
+    def test_fully_bold_sentence_is_not_a_heading(self):
+        raw = "## Key Takeaway\n**Takeaway culture is changing.**\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "Takeaway culture is changing."
+
+    def test_prose_starting_with_takeaway_keeps_its_words(self):
+        raw = "## Key Takeaway\nTakeaway culture is changing.\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "Takeaway culture is changing."
+
+    def test_prose_starting_with_in_summary_keeps_its_words(self):
+        raw = "## Key Takeaway\nIn summary, the tool saves time.\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "In summary, the tool saves time."
+
+    def test_labelled_takeaway_prefix_is_removed(self):
+        for raw in (
+            "## Key Takeaway\nKey takeaway: The tool saves time.\n",
+            "## Key Takeaway\nTakeaway - The tool saves time.\n",
+        ):
+            _, takeaway = normalise_summary(raw)
+            assert takeaway == "The tool saves time."
+
     def test_heading_after_first_bullet_is_demoted(self):
         raw = (
             "## Key Points\n\n"

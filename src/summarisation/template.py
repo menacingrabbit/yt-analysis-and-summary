@@ -39,12 +39,27 @@ _RULE_RE = re.compile(r"^\s*([-*_])\s*(\1\s*){2,}$")
 # "Key Takeaway" / "Key takeaways" as a heading, with an optional inline body
 # after a colon, e.g. "### Key Takeaway: Soccer is booming in the US."
 _TAKEAWAY_HEADER_RE = re.compile(r"^(?:the\s+)?key\s+takeaways?\b\s*(:?)\s*", re.IGNORECASE)
-# Label that may prefix a takeaway sentence, e.g. "Key takeaway: ...".
+# A *label* prefixing the takeaway sentence, e.g. "Key takeaway: ..." or
+# "Takeaway: ...". Requires an unambiguous separator so that prose which merely
+# starts with these words ("Takeaway culture is changing", "In summary, ...")
+# keeps its opening words.
 _TAKEAWAY_PREFIX_RE = re.compile(
-    r"^(?:(?:the\s+)?key\s+takeaways?|takeaway|in summary|in conclusion)\b\s*[:\-–—]?\s*",
+    r"^(?:(?:the\s+)?key\s+takeaways?|takeaways?)\s*(?::|[-–—])\s*",
     re.IGNORECASE,
 )
-_LEADING_BOLD_LABEL_RE = re.compile(r"^\*\*(.+?)\*\*\s*:?\s*")
+# A bold phrase followed by a colon is a label, e.g. "**Outcome**: ...", and is
+# discarded along with its separator.
+_LEADING_BOLD_COLON_RE = re.compile(r"^\*\*(.+?)\*\*\s*:\s*")
+# A bold phrase *without* a colon is emphasis, not a label: "**The policy**
+# changes ..." must keep its words, so only the markers are removed.
+_LEADING_BOLD_RE = re.compile(r"^\*\*(.+?)\*\*")
+# A bold segment that really is a discarded label ("**Key takeaway:**").
+_LEADING_BOLD_LABEL_RE = re.compile(
+    r"^\*\*((?:the\s+)?key\s+takeaways?|takeaways?)\s*:?\*\*\s*:?\s*", re.IGNORECASE
+)
+# Emphasis markers throughout a takeaway. The section is rendered as plain
+# prose, so a stray leading marker in the model's text must not survive.
+_EMPHASIS_MARKER_RE = re.compile(r"\*\*|__")
 
 
 def _strip_emphasis(text: str) -> str:
@@ -90,10 +105,17 @@ def _plain(line: str) -> str:
 
 
 def _clean_takeaway(text: str) -> str:
-    """Collapse *text* into one clean takeaway line."""
+    """Collapse *text* into one clean takeaway line.
+
+    Labels ("Key takeaway:", "**Takeaway:**") are removed, but a bold phrase
+    that is part of the sentence keeps its words — only the markers go.
+    """
     text = re.sub(r"\s+", " ", text).strip()
     text = _LEADING_BOLD_LABEL_RE.sub("", text)
     text = _TAKEAWAY_PREFIX_RE.sub("", text)
+    text = _LEADING_BOLD_COLON_RE.sub("", text)
+    text = _LEADING_BOLD_RE.sub(r"\1", text)
+    text = _EMPHASIS_MARKER_RE.sub("", text)
     return text.strip().strip("\"'`“”‘’").strip()
 
 
@@ -203,6 +225,20 @@ def normalise_summary(raw: str) -> tuple[list[str], str]:
     return points, _pick_takeaway(inline_takeaway, takeaway_lines, trailing, points)
 
 
+def _is_section_heading(line: str) -> bool:
+    """Return True if *line* starts a new section of the document.
+
+    Inside the takeaway section a heading means "an extra section follows".
+    A fully-bold line can be either a heading or a bolded takeaway sentence
+    (``**Takeaway culture is changing.**``), so terminal punctuation is used to
+    tell them apart: headings are noun phrases, sentences are terminated.
+    """
+    header = _header_text(line)
+    if header is None:
+        return False
+    return header[-1:] not in ".!?"
+
+
 def _pick_takeaway(
     inline: str,
     takeaway_lines: list[str] | None,
@@ -223,7 +259,7 @@ def _pick_takeaway(
                 if repeated:
                     parts.append(repeated)
                 continue
-            if _header_text(line) is not None:
+            if _is_section_heading(line):
                 break
             if _BULLET_RE.match(line):
                 # A takeaway written as a list item: keep its text, not "- ".
