@@ -36,3 +36,22 @@ def test_empty_model_response_fails_the_run_and_writes_nothing(tmp_path, mocker)
         summarise_and_save("transcript", tmp_path, "base", title="Title")
 
     assert list(tmp_path.glob("*_summary.txt")) == []
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "## Key Takeaway",
+        "## Key Points",
+        "## Key Points\n\n## Key Takeaway\n",
+        "```\n```\n",
+    ],
+)
+def test_semantically_empty_response_fails_the_run(tmp_path, mocker, raw):
+    """Non-blank responses with no usable content must not render placeholders."""
+    mocker.patch("src.summarisation.summariser.summarise", return_value=raw)
+
+    with pytest.raises(SummarisationError):
+        summarise_and_save("transcript", tmp_path, "base", title="Title")
+
+    assert list(tmp_path.glob("*_summary.txt")) == []

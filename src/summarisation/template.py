@@ -281,6 +281,16 @@ def _pick_takeaway(
     return ""
 
 
+def is_empty_summary(raw: str) -> bool:
+    """Return True if *raw* contains nothing usable for the template.
+
+    A response can be non-blank yet carry no summary at all — headings with no
+    body, only a code fence, only a preamble. Rendering it would emit the
+    placeholder text, which would mask a failed summarisation.
+    """
+    return normalise_summary(raw) == ([], "")
+
+
 def _clean_title(title: str) -> str:
     """Return *title* as a single-line H1-safe heading."""
     text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(title or ""))

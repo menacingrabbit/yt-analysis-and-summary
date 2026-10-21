@@ -7,6 +7,7 @@ from src.summarisation.template import (
     KEY_TAKEAWAY_HEADING,
     NO_TAKEAWAY_TEXT,
     UNTITLED_VIDEO,
+    is_empty_summary,
     normalise_summary,
     render_summary,
 )
@@ -211,6 +212,26 @@ class TestNormalise:
         )
         points, _ = normalise_summary(raw)
         assert points == ["- first", "**Sub-heading**", "- second"]
+
+
+class TestIsEmptySummary:
+    @pytest.mark.parametrize(
+        "raw",
+        ["", "   \n\t", "## Key Takeaway\n", "## Key Points\n\n## Key Takeaway\n", "```\n```"],
+    )
+    def test_empty(self, raw):
+        assert is_empty_summary(raw) is True
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "## Key Takeaway\nA sentence.\n",
+            "- a bullet\n",
+            "Here is a summary.",
+        ],
+    )
+    def test_not_empty(self, raw):
+        assert is_empty_summary(raw) is False
 
 
 class TestRender:

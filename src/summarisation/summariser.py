@@ -7,9 +7,9 @@ specified output file.
 
 from pathlib import Path
 
-from ..transcription.client import summarise
+from ..transcription.client import SummarisationError, summarise
 from ..utils.logging import logger
-from .template import render_summary
+from .template import is_empty_summary, render_summary
 
 
 def summarise_and_save(transcript: str, out_dir: Path, base_name: str, *, title: str) -> Path:
@@ -29,12 +29,20 @@ def summarise_and_save(transcript: str, out_dir: Path, base_name: str, *, title:
 
     Raises:
         SummarisationError: Propagated from :func:`summarise` when the
-            transcript is empty or the model returns no content. A summary is
-            never silently replaced by a placeholder, so the caller can fail
-            the run.
+            transcript is empty or the model returns no content, and raised
+            here when the response carries no usable points or takeaway (for
+            example headings with no body). A summary is never silently
+            replaced by a placeholder, so the caller can fail the run.
     """
     # Raises rather than returning "" — an empty summary is a pipeline failure.
     raw = summarise(transcript)
+    # The model can answer without failing while saying nothing: "## Key
+    # Takeaway" alone is non-blank but has no content to render. Catch that
+    # here, where the canonical template defines what "usable" means.
+    if is_empty_summary(raw):
+        raise SummarisationError(
+            f"Summarisation returned no usable content ({len(raw)} chars of headings/structure only)"
+        )
     summary = render_summary(title, raw)
     summary_path = out_dir / f"{base_name}_summary.txt"
     summary_path.write_text(summary, encoding="utf-8")
