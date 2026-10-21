@@ -13,6 +13,7 @@ from src.cli import (
     read_urls_from_file,
     validate_youtube_url,
 )
+from src.transcription.client import SummarisationError
 from src.yt.downloader import AudioDownload
 
 
@@ -109,6 +110,24 @@ class TestSummaryTitle:
     def test_missing_title_falls_back_to_the_filename_stem(self, tmp_path, monkeypatch, mocker):
         save = self._run(tmp_path, monkeypatch, mocker, "")
         assert save.call_args.kwargs["title"] == "a video"
+
+
+class TestEmptySummaryFailsTheRun:
+    """An empty summary must fail the run so the exit code stays a real gate."""
+
+    def test_process_single_url_returns_false(self, tmp_path, monkeypatch, mocker):
+        audio = tmp_path / "20260101-a-video-abc123DEF-_"
+        monkeypatch.setattr(
+            "src.cli.download_audio",
+            lambda *a, **k: AudioDownload(audio, "A Video", "abc123DEF-_"),
+        )
+        monkeypatch.setattr("src.cli.transcribe", lambda *a, **k: "a transcript")
+        monkeypatch.setattr(
+            "src.cli.summarise_and_save",
+            mocker.Mock(side_effect=SummarisationError("no content")),
+        )
+        opts = Options(no_summary=False, force=False, split=False)
+        assert process_single_url("https://youtu.be/abc123DEF-_", tmp_path, opts) is False
 
 
 class TestMainExitCodes:

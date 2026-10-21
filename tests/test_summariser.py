@@ -1,7 +1,10 @@
 """Tests for src.summarisation.summariser — template rendering on save."""
 
+import pytest
+
 from src.summarisation.summariser import summarise_and_save
 from src.summarisation.template import UNTITLED_VIDEO, render_summary
+from src.transcription.client import SummarisationError
 
 
 def test_written_summary_uses_canonical_template(tmp_path, mocker):
@@ -22,12 +25,14 @@ def test_empty_title_is_rendered_as_untitled(tmp_path, mocker):
     assert path.read_text(encoding="utf-8").startswith(f"# {UNTITLED_VIDEO}\n")
 
 
-def test_empty_model_response_still_writes_a_file(tmp_path, mocker):
-    mocker.patch("src.summarisation.summariser.summarise", return_value="")
+def test_empty_model_response_fails_the_run_and_writes_nothing(tmp_path, mocker):
+    """An empty summary is a failure, not a placeholder file."""
+    mocker.patch(
+        "src.summarisation.summariser.summarise",
+        side_effect=SummarisationError("no content"),
+    )
 
-    path = summarise_and_save("transcript", tmp_path, "base", title="Title")
+    with pytest.raises(SummarisationError):
+        summarise_and_save("transcript", tmp_path, "base", title="Title")
 
-    content = path.read_text(encoding="utf-8")
-    assert content.startswith("# Title\n")
-    assert "## Key Points" in content
-    assert "## Key Takeaway" in content
+    assert list(tmp_path.glob("*_summary.txt")) == []

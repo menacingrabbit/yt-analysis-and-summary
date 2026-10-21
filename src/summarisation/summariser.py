@@ -26,10 +26,15 @@ def summarise_and_save(transcript: str, out_dir: Path, base_name: str, *, title:
 
     Returns:
         Path to the written summary file.
+
+    Raises:
+        SummarisationError: Propagated from :func:`summarise` when the
+            transcript is empty or the model returns no content. A summary is
+            never silently replaced by a placeholder, so the caller can fail
+            the run.
     """
+    # Raises rather than returning "" — an empty summary is a pipeline failure.
     raw = summarise(transcript)
-    if not raw:
-        logger.warning("Summarisation returned no content; writing a placeholder summary")
     summary = render_summary(title, raw)
     summary_path = out_dir / f"{base_name}_summary.txt"
     summary_path.write_text(summary, encoding="utf-8")

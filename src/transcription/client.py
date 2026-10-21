@@ -275,7 +275,16 @@ def summarise(transcript: str) -> str:
 
     Returns the model's raw text; the canonical layout is applied afterwards by
     :func:`src.summarisation.template.render_summary`.
+
+    Raises:
+        SummarisationError: If *transcript* is empty. Checked before the API
+            call because an empty input can never produce a summary, so
+            retrying would only burn credits.
+        TransientSummarisationError: If the API returns no choices or blank
+            content. Retried, since an empty completion is usually transient.
     """
+    if not transcript.strip():
+        raise SummarisationError("Cannot summarise an empty transcript")
     logger.info(f"Summarising transcript (length={len(transcript)} chars)")
     payload = {
         "model": config.summarise_model(),
@@ -285,11 +294,14 @@ def summarise(transcript: str) -> str:
     data = _post_chat(payload)
     choices = data.get("choices") or []
     if not choices:
-        return ""
+        raise TransientSummarisationError("Summarisation response contained no choices")
     choice = choices[0]
     if choice.get("finish_reason") == "length":
         logger.warning(
             f"Summary hit max_tokens ({config.max_tokens()}); output may be truncated. "
             "Raise OPENROUTER_MAX_TOKENS for long videos."
         )
-    return choice.get("message", {}).get("content", "").strip()
+    content = choice.get("message", {}).get("content", "").strip()
+    if not content:
+        raise TransientSummarisationError("Summarisation response contained no content")
+    return content

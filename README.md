@@ -62,6 +62,9 @@ python -m src.cli --batch-file urls.txt --out-dir ./data
 
 **Exit codes:** `0` on success. A failed single run, or a batch run where any
 video fails, returns `1` — so the CLI works as a gate in scripts and CI.
+An empty transcript or an empty summarisation response counts as a failure:
+no placeholder summary is written, and the run reports the error rather than
+exiting `0`.
 
 ### Summary output format
 
