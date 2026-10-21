@@ -62,6 +62,34 @@ python -m src.cli --batch-file urls.txt --out-dir ./data
 
 **Exit codes:** `0` on success. A failed single run, or a batch run where any
 video fails, returns `1` — so the CLI works as a gate in scripts and CI.
+An empty transcript or an empty summarisation response counts as a failure:
+no placeholder summary is written, and the run reports the error rather than
+exiting `0`.
+
+### Summary output format
+
+Every summary file follows the same template, regardless of how the model
+responds:
+
+```markdown
+# <video title>
+
+## Key Points
+
+- one idea per bullet
+- …
+
+## Key Takeaway
+
+<one sentence>
+```
+
+The `#` heading is the video's real title (falling back to a readable version of
+the filename when no title is available). Renamed headings, introductory
+sentences and missing takeaway sections from the model are normalised away by
+`src/summarisation/template.py`, so outputs are predictable and easy to diff.
+If a summary is cut off, raise `OPENROUTER_MAX_TOKENS`; a warning is logged when
+the model hits the token limit.
 
 ### Batch file format
 

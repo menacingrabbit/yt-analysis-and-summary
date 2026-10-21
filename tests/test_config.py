@@ -2,7 +2,7 @@
 
 import pytest
 
-from src import config
+from src import config, defaults
 
 
 def test_get_api_key_requires_key(monkeypatch):
@@ -12,8 +12,9 @@ def test_get_api_key_requires_key(monkeypatch):
 
 
 def test_transcribe_model_default(monkeypatch):
+    """Unset env falls back to the constant in ``src.defaults``."""
     monkeypatch.delenv("OPENROUTER_TRANSCRIBE_MODEL", raising=False)
-    assert config.transcribe_model() == "mistralai/voxtral-mini-transcribe"
+    assert config.transcribe_model() == defaults.DEFAULT_TRANSCRIBE_MODEL
 
 
 def test_transcribe_model_overridable(monkeypatch):
@@ -22,8 +23,9 @@ def test_transcribe_model_overridable(monkeypatch):
 
 
 def test_summarise_model_default(monkeypatch):
+    """Unset env falls back to the constant in ``src.defaults``."""
     monkeypatch.delenv("OPENROUTER_SUMMARISE_MODEL", raising=False)
-    assert config.summarise_model() == "anthropic/claude-3.5-sonnet"
+    assert config.summarise_model() == defaults.DEFAULT_SUMMARISE_MODEL
 
 
 def test_summarise_model_overridable(monkeypatch):
@@ -33,17 +35,17 @@ def test_summarise_model_overridable(monkeypatch):
 
 def test_api_timeout_default(monkeypatch):
     monkeypatch.delenv("OPENROUTER_TIMEOUT", raising=False)
-    assert config.api_timeout() == 60.0
+    assert config.api_timeout() == defaults.DEFAULT_API_TIMEOUT
 
 
 def test_max_tokens_default(monkeypatch):
     monkeypatch.delenv("OPENROUTER_MAX_TOKENS", raising=False)
-    assert config.max_tokens() == 1024
+    assert config.max_tokens() == defaults.DEFAULT_MAX_TOKENS
 
 
 def test_chunk_duration_default(monkeypatch):
     monkeypatch.delenv("OPENROUTER_CHUNK_SECONDS", raising=False)
-    assert config.chunk_duration() == 590
+    assert config.chunk_duration() == defaults.DEFAULT_CHUNK_DURATION
 
 
 def test_chunk_duration_overridable(monkeypatch):
@@ -52,9 +54,9 @@ def test_chunk_duration_overridable(monkeypatch):
 
 
 def test_chunk_overlap_default(monkeypatch):
-    """The overlap default must match the CLI-documented default of 3."""
+    """The overlap default must match the CLI-documented value in src/defaults.py."""
     monkeypatch.delenv("OPENROUTER_CHUNK_OVERLAP", raising=False)
-    assert config.chunk_overlap() == 3
+    assert config.chunk_overlap() == defaults.DEFAULT_CHUNK_OVERLAP
 
 
 def test_chunk_overlap_overridable(monkeypatch):

@@ -19,19 +19,10 @@ from pathlib import Path
 from .. import config
 from ..utils.logging import logger
 
-# YouTube videos longer than ~10 minutes can exceed the OpenRouter
-# transcription API's input limit. We split at 590 seconds (just under
-# 10 minutes) to stay safely within the limit. This constant is the single
-# source of truth: :func:`src.config.chunk_duration` falls back to it when
-# ``OPENROUTER_CHUNK_SECONDS`` is unset.
-DEFAULT_CHUNK_DURATION = 590
-
-# Seconds of tail overlap between consecutive chunks when none is configured.
-# Each chunk starts this many seconds before the previous one ends. This is the
-# single source of truth for the overlap default (3s): :func:`src.config.chunk_overlap`
-# falls back to it when ``OPENROUTER_CHUNK_OVERLAP`` is unset, so direct callers
-# of :func:`split_audio` get the same default as the CLI.
-DEFAULT_CHUNK_OVERLAP = 3
+# The split defaults (``DEFAULT_CHUNK_DURATION`` / ``DEFAULT_CHUNK_OVERLAP``)
+# live in ``src/defaults.py``. This module always resolves them through
+# :func:`src.config.chunk_duration` / :func:`src.config.chunk_overlap`, so the
+# splitter, the CLI and the transcription client share one source of truth.
 
 # Prefix for the temporary directory that split_audio creates. cleanup_chunks
 # uses it to recognise (and only ever remove) temp dirs it owns, never a
@@ -63,12 +54,12 @@ def split_audio(
             a non-zero overlap the on-disk chunk repeats that many seconds of
             the previous chunk's tail). Defaults to
             :func:`src.config.chunk_duration` (``OPENROUTER_CHUNK_SECONDS`` env
-            var, else :data:`DEFAULT_CHUNK_DURATION`).
+            var, else :data:`src.defaults.DEFAULT_CHUNK_DURATION`).
         overlap_seconds: Seconds of tail overlap shared between consecutive
             chunks. 0 produces back-to-back chunks (the historical behaviour).
             Must satisfy ``0 <= overlap_seconds < chunk_duration``. Defaults to
             :func:`src.config.chunk_overlap` (``OPENROUTER_CHUNK_OVERLAP`` env
-            var, else :data:`DEFAULT_CHUNK_OVERLAP`).
+            var, else :data:`src.defaults.DEFAULT_CHUNK_OVERLAP`).
 
     Returns:
         Ordered list of chunk file paths. The first element is the

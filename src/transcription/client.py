@@ -47,13 +47,33 @@ _AUDIO_API_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 # Chat endpoint for summarisation.
 _CHAT_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Bullet-point summary prompt, with the transcript substituted in.
+# Summary prompt asking for the canonical template, with the transcript
+# substituted in. The template is also enforced in code by
+# ``src.summarisation.template`` because models drift from instructions.
 _SUMMARY_PROMPT = (
-    "Summarise the following transcript in bullet points, focusing on the "
-    "main ideas, arguments, and conclusions. Leave out any appearing advertising or promotion. "
-    "Write detailed but concise summaries. Finally, write 1 sentence summarising the key takeaway. "
-    "Use concise language."
-    "\n\n"
+    "Summarise the following transcript. "
+    "Leave out any appearing advertising or promotion. "
+    "Write a detailed but concise summary using concise language.\n"
+    "\n"
+    "Output exactly the structure below and nothing else:\n"
+    "\n"
+    "## Key Points\n"
+    "\n"
+    "- <point>\n"
+    "- <point>\n"
+    "\n"
+    "## Key Takeaway\n"
+    "\n"
+    "<one sentence>\n"
+    "\n"
+    "Rules:\n"
+    "- Use exactly the two headings '## Key Points' and '## Key Takeaway', in that order.\n"
+    "- Under '## Key Points', write only bullet points, one idea per bullet.\n"
+    "- Under '## Key Takeaway', write exactly one sentence with the key takeaway.\n"
+    "- Do not add a title, an introduction, a preamble, a closing paragraph or any "
+    "other section.\n"
+    "- Never start with phrases such as 'Here is a summary'.\n"
+    "\n"
     "The transcript may have been stitched together from multiple audio parts; "
     "sections are separated by '--- Part ... ---' markers. Consecutive parts may "
     "overlap slightly, so a short stretch of text can appear twice at a seam. "
@@ -210,11 +230,11 @@ def transcribe_split(
         audio_path: Path to the audio file to transcribe.
         chunk_duration: Maximum seconds per chunk (defaults to the
             ``OPENROUTER_CHUNK_SECONDS`` env var, else
-            ``audio.splitter.DEFAULT_CHUNK_DURATION``).
+            ``defaults.DEFAULT_CHUNK_DURATION``).
         overlap_seconds: Seconds of tail overlap between consecutive chunks so
             boundary-straddling speech is heard in full (defaults to the
             ``OPENROUTER_CHUNK_OVERLAP`` env var, else
-            ``audio.splitter.DEFAULT_CHUNK_OVERLAP``).
+            ``defaults.DEFAULT_CHUNK_OVERLAP``).
 
     Returns:
         The combined transcript string.
@@ -253,8 +273,18 @@ def transcribe_split(
 def summarise(transcript: str) -> str:
     """Summarise *transcript* using OpenRouter's chat endpoint.
 
-    Sends a concise prompt that asks for a bullet-point summary.
+    Returns the model's raw text; the canonical layout is applied afterwards by
+    :func:`src.summarisation.template.render_summary`.
+
+    Raises:
+        SummarisationError: If *transcript* is empty. Checked before the API
+            call because an empty input can never produce a summary, so
+            retrying would only burn credits.
+        TransientSummarisationError: If the API returns no choices or blank
+            content. Retried, since an empty completion is usually transient.
     """
+    if not transcript.strip():
+        raise SummarisationError("Cannot summarise an empty transcript")
     logger.info(f"Summarising transcript (length={len(transcript)} chars)")
     payload = {
         "model": config.summarise_model(),
@@ -264,5 +294,14 @@ def summarise(transcript: str) -> str:
     data = _post_chat(payload)
     choices = data.get("choices") or []
     if not choices:
-        return ""
-    return choices[0].get("message", {}).get("content", "").strip()
+        raise TransientSummarisationError("Summarisation response contained no choices")
+    choice = choices[0]
+    if choice.get("finish_reason") == "length":
+        logger.warning(
+            f"Summary hit max_tokens ({config.max_tokens()}); output may be truncated. "
+            "Raise OPENROUTER_MAX_TOKENS for long videos."
+        )
+    content = choice.get("message", {}).get("content", "").strip()
+    if not content:
+        raise TransientSummarisationError("Summarisation response contained no content")
+    return content

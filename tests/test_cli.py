@@ -4,7 +4,17 @@ import sys
 
 import pytest
 
-from src.cli import _options_from_args, main, parse_args, read_urls_from_file, validate_youtube_url
+from src.cli import (
+    Options,
+    _options_from_args,
+    main,
+    parse_args,
+    process_single_url,
+    read_urls_from_file,
+    validate_youtube_url,
+)
+from src.transcription.client import SummarisationError
+from src.yt.downloader import AudioDownload
 
 
 class TestValidateYoutubeUrl:
@@ -75,6 +85,49 @@ class TestOverlapSecondsFlag:
         )
         with pytest.raises(SystemExit):
             parse_args()
+
+
+class TestSummaryTitle:
+    """The real video title is threaded through to the summariser."""
+
+    def _run(self, tmp_path, monkeypatch, mocker, title):
+        audio = tmp_path / "20260101-a-video-abc123DEF-_"
+        monkeypatch.setattr(
+            "src.cli.download_audio",
+            lambda *a, **k: AudioDownload(audio, title, "abc123DEF-_"),
+        )
+        monkeypatch.setattr("src.cli.transcribe", lambda *a, **k: "a transcript")
+        save = mocker.patch("src.cli.summarise_and_save")
+        opts = Options(no_summary=False, force=False, split=False)
+        assert process_single_url("https://youtu.be/abc123DEF-_", tmp_path, opts) is True
+        return save
+
+    def test_real_title_is_used(self, tmp_path, monkeypatch, mocker):
+        save = self._run(tmp_path, monkeypatch, mocker, "Zerstört KI YouTube?")
+        save.assert_called_once()
+        assert save.call_args.kwargs["title"] == "Zerstört KI YouTube?"
+
+    def test_missing_title_falls_back_to_the_filename_stem(self, tmp_path, monkeypatch, mocker):
+        save = self._run(tmp_path, monkeypatch, mocker, "")
+        assert save.call_args.kwargs["title"] == "a video"
+
+
+class TestEmptySummaryFailsTheRun:
+    """An empty summary must fail the run so the exit code stays a real gate."""
+
+    def test_process_single_url_returns_false(self, tmp_path, monkeypatch, mocker):
+        audio = tmp_path / "20260101-a-video-abc123DEF-_"
+        monkeypatch.setattr(
+            "src.cli.download_audio",
+            lambda *a, **k: AudioDownload(audio, "A Video", "abc123DEF-_"),
+        )
+        monkeypatch.setattr("src.cli.transcribe", lambda *a, **k: "a transcript")
+        monkeypatch.setattr(
+            "src.cli.summarise_and_save",
+            mocker.Mock(side_effect=SummarisationError("no content")),
+        )
+        opts = Options(no_summary=False, force=False, split=False)
+        assert process_single_url("https://youtu.be/abc123DEF-_", tmp_path, opts) is False
 
 
 class TestMainExitCodes:

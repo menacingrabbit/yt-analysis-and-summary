@@ -24,6 +24,7 @@ from .summarisation.summariser import summarise_and_save
 from .transcription.client import transcribe, transcribe_split
 from .utils.logging import configure, logger
 from .yt.downloader import download_audio
+from .yt.utils import title_from_stem
 
 console = Console()
 
@@ -160,7 +161,8 @@ def process_single_url(url: str, out_dir: Path, opts: Options) -> bool:
     """
     try:
         console.print(f"[bold cyan]Processing:[/] {url}")
-        audio_path = download_audio(url, out_dir, force=opts.force)
+        download = download_audio(url, out_dir, force=opts.force)
+        audio_path = download.path
         console.print(f"[green]Audio ready at:[/] {audio_path}")
 
         console.print("[bold cyan]Transcribing audio…[/]")
@@ -175,7 +177,8 @@ def process_single_url(url: str, out_dir: Path, opts: Options) -> bool:
 
         if not opts.no_summary:
             console.print("[bold cyan]Generating summary…[/]")
-            _save_summary(transcript, out_dir, base_name)
+            video_title = download.title or title_from_stem(base_name)
+            _save_summary(transcript, out_dir, base_name, video_title)
 
         console.print("[bold green]Complete![/]")
         return True
@@ -230,9 +233,9 @@ def _save_transcript(transcript: str, out_dir: Path, base_name: str) -> None:
     console.print(f"[green]Transcript written to:[/] {transcript_path}")
 
 
-def _save_summary(transcript: str, out_dir: Path, base_name: str) -> None:
+def _save_summary(transcript: str, out_dir: Path, base_name: str, title: str) -> None:
     """Generate and save a summary, using the path returned by the summariser."""
-    summary_path = summarise_and_save(transcript, out_dir, base_name)
+    summary_path = summarise_and_save(transcript, out_dir, base_name, title=title)
     console.print(f"[green]Summary written to:[/] {summary_path}")
 
 
