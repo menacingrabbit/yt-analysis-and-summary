@@ -130,6 +130,39 @@ class TestNormalise:
         assert points == ["- First idea.", "- Second idea."]
         assert takeaway == "First idea. Second idea."
 
+    def test_takeaway_stops_at_an_appended_section(self):
+        """Regression: extra sections after the takeaway must not leak into it."""
+        raw = (
+            "## Key Points\n\n"
+            "- a\n\n"
+            "## Key Takeaway\n"
+            "The main point.\n"
+            "## Additional Context\n"
+            "- note\n"
+        )
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "The main point."
+
+    def test_takeaway_stops_at_an_appended_bold_section(self):
+        raw = "## Key Takeaway\nThe main point.\n\n**Sources**\n- note\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "The main point."
+
+    def test_takeaway_stops_before_appended_bullets_section(self):
+        raw = "## Key Takeaway\nMain sentence.\n\n## Further Reading\n- one\n- two\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "Main sentence."
+
+    def test_takeaway_wrapped_in_a_bullet_loses_the_marker(self):
+        raw = "## Key Takeaway\n- The main point.\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "The main point."
+
+    def test_duplicate_empty_takeaway_heading_is_skipped(self):
+        raw = "## Key Points\n- a\n## Key Takeaway\n## Key Takeaway\nReal sentence.\n"
+        _, takeaway = normalise_summary(raw)
+        assert takeaway == "Real sentence."
+
     def test_heading_after_first_bullet_is_demoted(self):
         raw = (
             "## Key Points\n\n"

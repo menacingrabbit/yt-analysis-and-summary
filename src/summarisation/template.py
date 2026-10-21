@@ -212,7 +212,26 @@ def _pick_takeaway(
     """Choose the takeaway, falling back when the section is missing or empty."""
     if takeaway_lines is not None:
         parts = [inline] if inline else []
-        parts.extend(_plain(line) for line in takeaway_lines if _plain(line))
+        for line in takeaway_lines:
+            # The takeaway is the last section of the template, so any *other*
+            # heading after it starts an extra section the model added
+            # (sources, "Additional Context") that must not be folded into the
+            # sentence. A repeated takeaway heading is not a new section — skip
+            # it and keep reading.
+            repeated = _takeaway_header(line)
+            if repeated is not None:
+                if repeated:
+                    parts.append(repeated)
+                continue
+            if _header_text(line) is not None:
+                break
+            if _BULLET_RE.match(line):
+                # A takeaway written as a list item: keep its text, not "- ".
+                parts.append(_BULLET_RE.match(line).group(3))
+                continue
+            plain = _plain(line)
+            if plain:
+                parts.append(plain)
         if parts:
             return _clean_takeaway(" ".join(parts))
 
